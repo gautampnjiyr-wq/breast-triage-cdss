@@ -40,6 +40,8 @@ def fetch_patient_registry():
                             row["date_exam"] = datetime.date.today()
                     row["images"] = row.get("images") or []
                     row["audit_log"] = row.get("audit_log") or []
+                    row["asha_area"] = row.get("asha_area") or ""
+                    row["asha_contact"] = row.get("asha_contact") or ""
                     db_dict[row["case_id"]] = row
                 return db_dict
         except Exception as e:
@@ -71,8 +73,9 @@ def fetch_patient_registry():
                 "pathologist": "Dr. Priya Sharma, MD Pathology",
                 "yokohama": "Category 2: Benign Cells (Risk of Malignancy: <3%)",
                 "path_notes": "Abundant naked bipolar nuclei with sheets of cohesive benign ductal epithelial cells.",
-                "asha_worker": "Meena Devi (ANM/ASHA)",
+                "asha_worker": "Meena Devi",
                 "asha_contact": "+91 9876543210",
+                "asha_area": "Sub-Center Raipur, Sector 4",
                 "tracker_status": "Referral Pending (Counseling completed at PHC)",
                 "audit_log": [
                     f"[{datetime.date.today()} 09:30] Registered & Examined by Dr. Rajiv Singh, MBBS",
@@ -183,7 +186,7 @@ role = st.sidebar.radio(
 # ==========================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
     st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
-    st.caption("Register patients, record clinical exams, upload micrographs, and manage slide records.")
+    st.caption("Register patients, edit demographics, record exams, manage micrographs, and assign ASHA personnel.")
 
     tab_edit, tab_register = st.tabs(["📝 View / Edit Current Patient", "➕ Register New Patient"])
 
@@ -197,6 +200,13 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
             new_case_id = c1.text_input("Case ID (Unique)", f"PB-2026-{len(st.session_state.patients)+1001}")
             new_pincode = c2.text_input("Pincode", "248001")
             new_doc = c3.text_input("Examining MO Name", "Dr. Rajiv Singh, MBBS")
+            
+            st.markdown("##### Community Worker Assignment")
+            a1, a2, a3 = st.columns(3)
+            new_asha_name = a1.text_input("ASHA Worker Name", "Meena Devi")
+            new_asha_phone = a2.text_input("ASHA Contact Number", "")
+            new_asha_area = a3.text_input("Assigned Sector / Village", "Sub-Center Sector 1")
+            
             submit_new = st.form_submit_button("Register & Activate Record")
 
             if submit_new and new_case_id:
@@ -224,8 +234,9 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     "pathologist": "Pending Review",
                     "yokohama": "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
                     "path_notes": "Awaiting slide image review.",
-                    "asha_worker": "Meena Devi (ANM/ASHA)",
-                    "asha_contact": "+91 9876543210",
+                    "asha_worker": new_asha_name,
+                    "asha_contact": new_asha_phone,
+                    "asha_area": new_asha_area,
                     "tracker_status": "Referral Pending (Counseling completed at PHC)",
                     "audit_log": [f"[{datetime.date.today()}] Record created by {new_doc}"]
                 }
@@ -237,17 +248,24 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
     with tab_edit:
         st.subheader(f"Demographic & Clinical Profile: {patient['name']} ({patient['case_id']})")
         
-        with st.expander("✏️ Edit Demographics & Registration Details", expanded=False):
+        with st.expander("✏️ Edit Demographics & ASHA Assignment", expanded=False):
             ed1, ed2, ed3 = st.columns(3)
-            patient["name"] = ed1.text_input("Patient Full Name:", patient["name"])
-            patient["age"] = ed2.number_input("Age:", 15, 100, int(patient["age"]))
-            patient["uhid"] = ed3.text_input("UHID:", patient["uhid"])
-            patient["pincode"] = ed1.text_input("Pincode / Area:", patient["pincode"])
-            patient["referral_doc"] = ed2.text_input("Examining MO:", patient["referral_doc"])
-            if st.button("Save Profile Changes"):
-                patient["audit_log"].append(f"[{datetime.date.today()}] Demographics updated by MO")
+            patient["name"] = ed1.text_input("Patient Full Name:", patient.get("name", ""))
+            patient["age"] = ed2.number_input("Age:", 15, 100, int(patient.get("age", 45)))
+            patient["uhid"] = ed3.text_input("UHID:", patient.get("uhid", ""))
+            patient["pincode"] = ed1.text_input("Pincode:", patient.get("pincode", ""))
+            patient["referral_doc"] = ed2.text_input("Examining MO:", patient.get("referral_doc", ""))
+
+            st.markdown("##### Assigned ASHA / Community Health Worker")
+            as1, as2, as3 = st.columns(3)
+            patient["asha_worker"] = as1.text_input("ASHA Worker Name:", patient.get("asha_worker", ""))
+            patient["asha_contact"] = as2.text_input("ASHA Phone Number:", patient.get("asha_contact", ""))
+            patient["asha_area"] = as3.text_input("ASHA Assigned Area / Village:", patient.get("asha_area", ""))
+
+            if st.button("Save Profile & ASHA Details"):
+                patient["audit_log"].append(f"[{datetime.date.today()}] Demographics & ASHA updated by MO")
                 save_patient_record(patient)
-                st.success("Patient profile updated.")
+                st.success("Patient & ASHA profile updated successfully.")
 
         col_left, col_right = st.columns(2)
         with col_left:
@@ -329,7 +347,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     delete_slide_image(item)
                     patient["images"].pop(idx)
                     patient["audit_log"].append(
-                        f"[{datetime.date.today()}] Slide image #{idx+1} removed by MO ({patient['referral_doc']})"
+                        f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})"
                     )
                     save_patient_record(patient)
                     st.success(f"Field #{idx+1} deleted.")
@@ -413,7 +431,7 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                     delete_slide_image(item)
                     patient["images"].pop(idx)
                     patient["audit_log"].append(
-                        f"[{datetime.date.today()}] Slide image #{idx+1} removed by Tech ({patient['prep_tech']})"
+                        f"[{datetime.date.today()}] Slide #{idx+1} deleted by Tech ({patient['prep_tech']})"
                     )
                     save_patient_record(patient)
                     st.success(f"Field #{idx+1} deleted.")
@@ -745,7 +763,9 @@ elif role == "4. CDSS Triage & Advisory Report":
         <div class="footer-signatures">
             <div style="flex: 1.2; min-width: 180px;">
                 <strong>Community Tracker:</strong><br>
-                ASHA: {p['asha_worker']} ({p['asha_contact']})<br>
+                ASHA: {p.get('asha_worker', 'Unassigned')}<br>
+                Contact: {p.get('asha_contact') if p.get('asha_contact') else 'Not Provided'}<br>
+                Area: {p.get('asha_area') if p.get('asha_area') else p.get('pincode', 'N/A')}<br>
                 Safety Window: 21 Days
             </div>
             <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
@@ -769,16 +789,22 @@ elif role == "4. CDSS Triage & Advisory Report":
 # MODULE 5: ASHA CLOSED-LOOP TRACKER
 # ==========================================
 elif role == "5. ASHA Closed-Loop Tracker":
-    st.header(f"5. ASHA / ANM Community Follow-Up Tracking: {patient['name']}")
+    st.header(f"5. ASHA Community Follow-Up Tracking: {patient['name']}")
     st.caption("Monitor tertiary referral completion within the 21-day window to eliminate loss-to-follow-up.")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("#### Patient Details")
-        st.write(f"**Patient Name:** {patient['name']} (Age: {patient['age']})")
-        st.write(f"**Case ID:** `{patient['case_id']}` | **UHID:** `{patient['uhid']}`")
-        st.write(f"**Assigned ASHA Worker:** {patient['asha_worker']}")
-        st.write(f"**Contact Number:** {patient['asha_contact']}")
+        st.markdown("#### ASHA Worker Assignment & Contact")
+        patient["asha_worker"] = st.text_input("ASHA Worker Name:", patient.get("asha_worker", ""))
+        patient["asha_contact"] = st.text_input("ASHA Contact Number:", patient.get("asha_contact", ""))
+        patient["asha_area"] = st.text_input("Assigned Area / Sector / Village:", patient.get("asha_area", ""))
+        
+        if st.button("Update ASHA Worker Details"):
+            patient["audit_log"].append(
+                f"[{datetime.date.today()}] ASHA reassigned to {patient['asha_worker']} (Area: {patient['asha_area']})"
+            )
+            save_patient_record(patient)
+            st.success("ASHA contact and area updated.")
 
     with col2:
         st.markdown("#### Referral Milestone Status")
@@ -841,7 +867,7 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
             patient["prep_tech"],
             f"{len(patient.get('images', []))} photos total",
             patient.get("pathologist", ""),
-            patient["asha_worker"]
+            f"{patient.get('asha_worker', '')} ({patient.get('asha_area', '')})"
         ]
     }
     st.table(summary_data)
