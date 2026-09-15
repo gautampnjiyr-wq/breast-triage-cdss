@@ -1,9 +1,9 @@
-import streamlit as st
 import datetime
+import streamlit as st
 from PIL import Image
 
 st.set_page_config(
-    page_title="Peripheral Breast Triage CDSS",
+    page_title="Breast Triage CDSS",
     page_icon="🩺",
     layout="wide"
 )
@@ -20,27 +20,27 @@ if "patient_data" not in st.session_state:
         "pincode": "248001",
         "asha_worker": "Meena Devi (ANM/ASHA)",
         "asha_contact": "+91 9876543210",
-        "cbe_mass": "Hard, Irregular (Tethered/Fixed)",
+        "cbe_mass": "Hard, Irregular (Tethered/Fixed to skin or fascia)",
         "cbe_size": "4.0 cm",
-        "cbe_nodes": "Present (Firm, Non-tender)",
+        "cbe_nodes": "Present (Firm, Non-tender, or Matted)",
         "pocus_available": True,
-        "pocus_orientation": "Taller-than-wide (Vertical growth)",
-        "pocus_margins": "Irregular / Spiculated",
-        "pocus_posterior": "Posterior acoustic shadowing",
+        "pocus_orientation": "Taller-than-wide (Vertical growth / Transverse to skin)",
+        "pocus_margins": "Irregular / Spiculated / Microlobulated",
+        "pocus_posterior": "Posterior acoustic shadowing (dark shadow behind mass)",
         "fnac_passes": "2 passes (23G Needle, Capillary method)",
         "prep_tech": "Lab Tech Sarah Khan",
-        "staining": "Diff-Quik (90-second rapid stain)",
-        "macro_adequate": "Yes (Chalky fragments visible)",
+        "staining": "Diff-Quik (90-second rapid Romanowsky)",
+        "macro_adequate": "Yes (Chalky/white granular fragments visible against light)",
         "tele_images": [],
         "pathologist": "Dr. Priya Sharma, MD Pathology",
-        "yokohama": "Category 2: Benign Cells (ROM <3%)",
+        "yokohama": "Category 2: Benign Cells (Risk of Malignancy: <3%)",
         "path_notes": "Abundant naked bipolar nuclei with sheets of cohesive benign ductal epithelial cells. No marked atypia in viewed fields.",
-        "tracker_status": "Referral Pending"
+        "tracker_status": "Referral Pending (Counseling completed at PHC)"
     }
 
 # --- SIDEBAR ROLE ROUTER ---
-st.sidebar.title("🩺 Peripheral Triage Portal")
-st.sidebar.caption("Role-Based Clinical Decision Support System")
+st.sidebar.title("🩺 Breast Triage CDSS")
+st.sidebar.caption("Evidence-Based Clinical Decision Support System")
 
 role = st.sidebar.radio(
     "Select Workflow Cadre:",
@@ -55,8 +55,8 @@ role = st.sidebar.radio(
 
 st.sidebar.divider()
 st.sidebar.info(
-    "**Operating Protocol:** Clinical exam and sample collection must be executed by a registered Medical Officer. "
-    "Technicians manage preparation, staining, and tele-imaging."
+    "**Operating Protocol:** Clinical examination and needle sampling must be executed by a registered Medical Officer. "
+    "Technicians manage slide preparation, staining, and tele-cytology imaging."
 )
 
 # ==========================================
@@ -64,13 +64,13 @@ st.sidebar.info(
 # ==========================================
 if role == "1. Medical Officer (Exam & Bedside POCUS)":
     st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
-    st.caption("Document patient demographics, standardized clinical palpation, and optional bedside ultrasound.")
+    st.caption("Document patient demographics, standardized clinical palpation, and bedside ultrasound morphology.")
 
     with st.expander("Patient Demographics & Registration", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
             st.session_state.patient_data["name"] = st.text_input("Patient Name", st.session_state.patient_data["name"])
-            st.session_state.patient_data["age"] = st.number_input("Age (Years)", 15, 100, st.session_state.patient_data["age"])
+            st.session_state.patient_data["age"] = st.number_input("Age (Years)", 15, 100, int(st.session_state.patient_data["age"]))
         with col2:
             st.session_state.patient_data["uhid"] = st.text_input("UHID / National ID", st.session_state.patient_data["uhid"])
             st.session_state.patient_data["case_id"] = st.text_input("Case ID", st.session_state.patient_data["case_id"])
@@ -97,7 +97,7 @@ if role == "1. Medical Officer (Exam & Bedside POCUS)":
             index=1
         )
         st.session_state.patient_data["fnac_passes"] = st.text_input(
-            "Needle Sampling Performed by MO:",
+            "Needle Sampling Technique:",
             st.session_state.patient_data["fnac_passes"]
         )
 
@@ -125,18 +125,18 @@ if role == "1. Medical Officer (Exam & Bedside POCUS)":
         else:
             st.info("Ultrasound bypassed. Triage engine will evaluate Clinical-Cytological concordance only.")
 
-    st.success("✅ Medical Officer findings saved to clinical session.")
+    st.success("Medical Officer clinical findings recorded.")
 
 # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining & Microscopy)":
     st.header("2. Laboratory Technician: Smear, Staining & Tele-Imaging")
-    st.caption("Track rapid on-site slide processing, macroscopic adequacy, and smartphone microscope image capture.")
+    st.caption("Record rapid slide preparation, macroscopic adequacy, and smartphone photomicrographs.")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Rapid Bedside Preparation")
+        st.subheader("Rapid Bedside Slide Processing")
         st.session_state.patient_data["prep_tech"] = st.text_input(
             "Slide Prepared by (Technician Name):",
             st.session_state.patient_data["prep_tech"]
@@ -160,23 +160,25 @@ elif role == "2. Lab Technician (Staining & Microscopy)":
 
     with col2:
         st.subheader("Tele-Cytology Capture (Smartphone Mount)")
-        st.markdown("""
-        * Mount smartphone bracket to 10x ocular eyepiece.
-        * Apply **1.5x zoom** to eliminate vignetting; lock AE/AF focus.
-        * Upload 2-3 focused photomicrographs for remote review.
-        """)
+        st.markdown(
+            """
+            * Mount universal clamp onto microscope eyepiece.
+            * Set camera to **1.5x zoom** to remove vignetting; lock focus.
+            * Capture at least one 10x overview and one 40x nuclear detail field.
+            """
+        )
         uploaded_files = st.file_uploader(
-            "Upload Photomicrographs (10x Overview & 40x Nuclear Detail):",
+            "Upload Slide Images (10x Overview & 40x Nuclear Detail):",
             type=["jpg", "png", "jpeg"],
             accept_multiple_files=True
         )
         if uploaded_files:
             st.session_state.patient_data["tele_images"] = uploaded_files
-            st.success(f"{len(uploaded_files)} slide photo(s) attached.")
+            st.success(f"{len(uploaded_files)} slide photo(s) attached successfully.")
 
     if st.session_state.patient_data["tele_images"]:
         st.divider()
-        st.subheader("Current Uploaded Micrographs")
+        st.subheader("Attached Micrographs")
         img_cols = st.columns(min(len(st.session_state.patient_data["tele_images"]), 4))
         for idx, img_file in enumerate(st.session_state.patient_data["tele_images"]):
             with img_cols[idx % 4]:
@@ -188,7 +190,7 @@ elif role == "2. Lab Technician (Staining & Microscopy)":
 # ==========================================
 elif role == "3. Accessing Pathologist (Tele-Review)":
     st.header("3. Accessing Pathologist: Cytology Assessment")
-    st.caption("Review digitized fields and categorize smears using the International Academy of Cytology (IAC) Yokohama System.")
+    st.caption("Review digitized fields remotely and categorize using the IAC Yokohama System.")
 
     col1, col2 = st.columns([1, 1])
 
@@ -199,7 +201,7 @@ elif role == "3. Accessing Pathologist (Tele-Review)":
                 image = Image.open(img_file)
                 st.image(image, caption=f"Photomicrograph {idx+1}", use_container_width=True)
         else:
-            st.warning("No tele-cytology images uploaded yet. Technicians can attach files under Module 2.")
+            st.warning("No tele-cytology images uploaded yet. Technicians can attach files in Module 2.")
 
     with col2:
         st.subheader("Standardized Diagnostic Classification")
@@ -225,7 +227,7 @@ elif role == "3. Accessing Pathologist (Tele-Review)":
             st.session_state.patient_data["path_notes"],
             height=120
         )
-        st.success("✅ Pathologist sign-off recorded.")
+        st.success("Pathologist review registered.")
 
 # ==========================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
@@ -233,8 +235,10 @@ elif role == "3. Accessing Pathologist (Tele-Review)":
 elif role == "4. CDSS Triage & Advisory Report":
     st.header("4. Clinical Decision Support System (CDSS) Advisory")
 
-    # Determine Clinical Suspicion Index (CSI)
-    cbe_suspicious = "Hard, Irregular" in st.session_state.patient_data["cbe_mass"] or "Present" in st.session_state.patient_data["cbe_nodes"]
+    cbe_suspicious = (
+        "Hard, Irregular" in st.session_state.patient_data["cbe_mass"] or 
+        "Present" in st.session_state.patient_data["cbe_nodes"]
+    )
     
     usg_suspicious = False
     if st.session_state.patient_data["pocus_available"]:
@@ -252,18 +256,18 @@ elif role == "4. CDSS Triage & Advisory Report":
         status_banner = "CRITICAL DISCORDANCE (HIGH RISK FLAGS)"
         status_color = "red"
         analysis_text = (
-            "Physical examination and/or bedside ultrasound show marked high-suspicion features, "
-            "but fine-needle aspiration cytology is reported as benign. Fine-needle aspiration frequently "
-            "misses malignant cores in dense, scirrhous, or irregular tumors (geographic sampling error). "
-            "Due to high pre-test probability, significant residual malignancy risk remains (~20%–30%)."
+            "Physical examination and/or bedside ultrasound show high-suspicion features, "
+            "yet fine-needle aspiration cytology is reported as benign. FNAB has a recognized false-negative "
+            "rate due to geographic sampling misses in dense or scirrhous tumors. "
+            "Based on Bayesian pre-test probability, residual malignancy risk remains significant (~20%–30%)."
         )
-        action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy or reassuring the patient is unsafe."
+        action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy or reassuring the patient as disease-free is clinically unsafe."
     elif "Category 1: Insufficient" in yokohama:
-        status_banner = "INADEQUATE SAMPLING (INDETERMINATE)"
+        status_banner = "INSUFFICIENT SAMPLING (INDETERMINATE)"
         status_color = "orange"
         analysis_text = (
-            "Cytology sample contains insufficient epithelial cells for evaluation. An inadequate smear "
-            "does not indicate absence of disease. Baseline risk of malignancy is 10%–25%."
+            "Cytology sample contains inadequate diagnostic epithelial groups. An inadequate smear does not "
+            "indicate an absence of malignancy. Baseline risk of malignancy remains 10%–25%."
         )
         action_text = "REPEAT GUIDED FNAB OR PROCEED DIRECTLY TO CORE BIOPSY based on clinical suspicion."
     elif "Category 4: Suspicious" in yokohama or "Category 5: Malignant" in yokohama:
@@ -275,17 +279,16 @@ elif role == "4. CDSS Triage & Advisory Report":
         )
         action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 biomarker profiling) and definitive oncology staging."
     elif "Category 3: Atypical" in yokohama:
-        status_banner = "ATYPICAL EPITHELIAL CELLS (EQUIVOCAL)"
+        status_banner = "ATYPICAL CYTOLOGY (EQUIVOCAL)"
         status_color = "orange"
         analysis_text = "Smear exhibits architectural or nuclear atypia. Risk of malignancy is 15%–50%."
-        action_text = "REFER FOR HISTOPATHOLOGIC EVALUATION (Core-Needle Biopsy or Excision)."
+        action_text = "REFER FOR HISTOPATHOLOGIC EVALUATION (Core-Needle Biopsy or diagnostic excision)."
     else:
         status_banner = "CONCORDANT BENIGN PROFILE"
         status_color = "green"
-        analysis_text = "Clinical examination, bedside sonography, and cytology findings align without suspicious features."
-        action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on warning signs."
+        analysis_text = "Physical examination, bedside sonography, and cytology findings align without suspicious features."
+        action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on self-awareness warning signs."
 
-    # Render Screen CDSS Banner
     if status_color == "red":
         st.error(f"🚨 **{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
     elif status_color == "orange":
@@ -295,12 +298,11 @@ elif role == "4. CDSS Triage & Advisory Report":
 
     st.divider()
     st.subheader("Formal Monochromatic Clinical Advisory Slip")
-    st.caption("Clean, print-ready format for medical records and patient referral packets.")
+    st.caption("Standardized print-ready report for district hospital referral packets and medical records.")
 
-    # Printable Formal Slip HTML
     p = st.session_state.patient_data
     report_html = f"""
-    <div style="border: 2px solid #222; padding: 24px; font-family: 'Helvetica', Arial, sans-serif; color: #111; background-color: #fff; line-height: 1.4;">
+    <div style="border: 2px solid #222; padding: 24px; font-family: Arial, sans-serif; color: #111; background-color: #fff; line-height: 1.4;">
         <div style="text-align: center; border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 16px;">
             <h2 style="margin: 0; text-transform: uppercase; letter-spacing: 1px;">PERIPHERAL BREAST TRIAGE UNIT</h2>
             <div style="font-size: 13px; font-weight: bold; color: #444;">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
@@ -377,7 +379,7 @@ elif role == "5. ASHA Closed-Loop Tracker":
 
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Case Details")
+        st.subheader("Case Identification")
         st.write(f"**Patient:** {st.session_state.patient_data['name']} (Age: {st.session_state.patient_data['age']})")
         st.write(f"**Case ID:** {st.session_state.patient_data['case_id']} | UHID: {st.session_state.patient_data['uhid']}")
         st.write(f"**Assigned ASHA Worker:** {st.session_state.patient_data['asha_worker']}")
@@ -391,4 +393,22 @@ elif role == "5. ASHA Closed-Loop Tracker":
                 "Referral Pending (Counseling completed at PHC)",
                 "Appointment Scheduled at District Hospital",
                 "Core-Needle Biopsy Completed (Awaiting Histopath)",
-                "Report Received & Fo
+                "Report Received & Followed Up",
+                "Patient Hesitant / Refused (Requires ASHA Home Visit)"
+            ],
+            index=0
+        )
+        st.date_input("Follow-Up Target Date (21 Days):", datetime.date.today() + datetime.timedelta(days=21))
+
+    st.divider()
+    st.subheader("Vernacular Patient Counseling Slip (Hindi)")
+    st.markdown("Display or print this guidance directly for the patient and family:")
+
+    vernacular_box = """
+    > ### स्तन स्वास्थ्य: रोगी परामर्श पर्ची
+    > * **जांच का उद्देश्य:** आपकी शारीरिक जांच और सुई की शुरुआती जांच में अंतर पाया गया है।
+    > * **बायोप्सी क्यों जरूरी है?** सुई की बारीक जांच कभी-कभी गांठ के अंदरूनी हिस्से तक नहीं पहुंच पाती। इसलिए 100% सही नतीजे के लिए बड़े अस्पताल में कोर बायोप्सी अनिवार्य है।
+    > * **घबराएं नहीं:** कोर बायोप्सी कोई बड़ा ऑपरेशन नहीं है। यह सुन्न करके की जाने वाली ओपीडी जांच है और इससे गांठ बिल्कुल नहीं फैलती।
+    > * **अगला कदम:** अपनी आशा दीदी की मदद से 21 दिनों के भीतर जिला अस्पताल में जाकर यह जांच पूरी करवाएं।
+    """
+    st.markdown(vernacular_box)
