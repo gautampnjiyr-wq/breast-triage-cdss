@@ -28,21 +28,26 @@ if "patients" not in st.session_state:
             "pocus_margins": "Irregular / Spiculated / Microlobulated",
             "pocus_posterior": "Posterior acoustic shadowing (dark shadow behind mass)",
             "fnac_passes": "2 passes (23G Needle, Capillary method)",
+            # Preparation & Imaging Attribution
             "prep_tech": "Lab Tech Sarah Khan",
             "staining": "Diff-Quik (90-second rapid Romanowsky)",
             "macro_adequate": "Yes (Chalky/white granular fragments visible against light)",
-            "image_uploader_role": "Lab Technician",
-            "image_uploader_name": "Lab Tech Sarah Khan",
-            "tele_images": [],
+            # Multi-uploader image repository (List of dicts)
+            "images": [],
+            # Diagnostic Assessment Status
+            "review_mode": "Final Pathologist Sign-Off",  # 'Awaiting Review', 'AI Provisional', 'Final Pathologist Sign-Off'
             "pathologist": "Dr. Priya Sharma, MD Pathology",
             "yokohama": "Category 2: Benign Cells (Risk of Malignancy: <3%)",
             "path_notes": "Abundant naked bipolar nuclei with sheets of cohesive benign ductal epithelial cells. No marked atypia in viewed fields.",
+            # ASHA Tracker
             "asha_worker": "Meena Devi (ANM/ASHA)",
             "asha_contact": "+91 9876543210",
             "tracker_status": "Referral Pending (Counseling completed at PHC)",
+            # Activity Audit Trail
             "audit_log": [
-                f"[{datetime.date.today()} 09:30] Clinical exam and POCUS performed by Dr. Rajiv Singh, MBBS",
-                f"[{datetime.date.today()} 09:45] Slide prepared & stained with Diff-Quik by Lab Tech Sarah Khan"
+                f"[{datetime.date.today()} 09:30] Registered & Examined by Dr. Rajiv Singh, MBBS",
+                f"[{datetime.date.today()} 09:45] Stained with Diff-Quik by Lab Tech Sarah Khan",
+                f"[{datetime.date.today()} 10:15] Cytology finalized as Category 2 by Dr. Priya Sharma, MD Pathology"
             ]
         }
     }
@@ -63,7 +68,15 @@ selected_case = st.sidebar.selectbox(
 st.session_state.active_case_id = selected_case
 patient = st.session_state.patients[st.session_state.active_case_id]
 
-st.sidebar.markdown(f"**Selected:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")
+# Sidebar Status Pill
+if patient["review_mode"] == "Final Pathologist Sign-Off":
+    st.sidebar.success("● Pathologist Reviewed")
+elif patient["review_mode"] == "AI Provisional":
+    st.sidebar.warning("⚡ AI Provisional Triage")
+else:
+    st.sidebar.info("⏳ Awaiting Cytology Review")
+
+st.sidebar.markdown(f"**Patient:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")
 st.sidebar.divider()
 
 role = st.sidebar.radio(
@@ -71,7 +84,7 @@ role = st.sidebar.radio(
     [
         "1. Medical Officer (Exam, POCUS & Direct Upload)",
         "2. Lab Technician (Staining, Patient Link & Upload)",
-        "3. Accessing Pathologist (Consolidated Tele-Review)",
+        "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
         "4. CDSS Triage & Advisory Report",
         "5. ASHA Closed-Loop Tracker",
         "6. Audit Trail & Provenance (Who Did What)"
@@ -83,18 +96,21 @@ role = st.sidebar.radio(
 # ==========================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
     st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
-    st.caption("Register patients, record clinical breast exams, POCUS morphology, and optionally upload slide photos directly.")
+    st.caption("Register patients, edit existing demographics, record clinical exams, and upload micrographs.")
 
-    with st.expander("➕ Register a New Patient Case"):
+    tab_edit, tab_register = st.tabs(["📝 View / Edit Current Patient", "➕ Register New Patient"])
+
+    with tab_register:
         with st.form("new_patient_form"):
+            st.subheader("New Patient Intake")
             c1, c2, c3 = st.columns(3)
             new_name = c1.text_input("Full Name")
-            new_age = c2.number_input("Age", 15, 100, 45)
-            new_uhid = c3.text_input("UHID / National ID")
-            new_case_id = c1.text_input("Assigned Case ID (Unique)", f"PB-2026-{len(st.session_state.patients)+1001}")
+            new_age = c2.number_input("Age (Years)", 15, 100, 45)
+            new_uhid = c3.text_input("UHID / National Health ID")
+            new_case_id = c1.text_input("Case ID (Unique)", f"PB-2026-{len(st.session_state.patients)+1001}")
             new_pincode = c2.text_input("Pincode", "248001")
-            new_doc = c3.text_input("Doctor Name", "Dr. Rajiv Singh, MBBS")
-            submit_new = st.form_submit_button("Create Patient Record")
+            new_doc = c3.text_input("Examining MO Name", "Dr. Rajiv Singh, MBBS")
+            submit_new = st.form_submit_button("Register & Activate Record")
 
             if submit_new and new_case_id:
                 st.session_state.patients[new_case_id] = {
@@ -116,10 +132,9 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     "prep_tech": "Unassigned",
                     "staining": "Diff-Quik (90-second rapid Romanowsky)",
                     "macro_adequate": "Pending Assessment",
-                    "image_uploader_role": "None",
-                    "image_uploader_name": "None",
-                    "tele_images": [],
-                    "pathologist": "Unassigned",
+                    "images": [],
+                    "review_mode": "Awaiting Review",
+                    "pathologist": "Pending Review",
                     "yokohama": "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
                     "path_notes": "Awaiting slide image review.",
                     "asha_worker": "Meena Devi (ANM/ASHA)",
@@ -128,81 +143,106 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     "audit_log": [f"[{datetime.date.today()}] Record created by {new_doc}"]
                 }
                 st.session_state.active_case_id = new_case_id
-                st.success(f"Case {new_case_id} created successfully.")
+                st.success(f"Case {new_case_id} registered and set to active.")
                 st.rerun()
 
-    st.subheader(f"Editing Exam Record: {patient['name']} ({patient['case_id']})")
-    
-    col_left, col_right = st.columns(2)
-    with col_left:
-        st.markdown("#### Standardized Clinical Palpation (CBE)")
-        patient["cbe_mass"] = st.selectbox(
-            "Mass Consistency & Fixity:",
-            [
-                "Soft / Rubbery, Well-circumscribed, Freely mobile",
-                "Firm, Discrete, Moderately mobile",
-                "Hard, Irregular (Tethered/Fixed to skin or fascia)"
-            ],
-            index=2 if "Hard" in patient["cbe_mass"] else 1
-        )
-        patient["cbe_size"] = st.text_input("Approximate Mass Diameter (cm):", patient["cbe_size"])
-        patient["cbe_nodes"] = st.selectbox(
-            "Ipsilateral Axillary Adenopathy:",
-            ["Absent (Clinically negative)", "Present (Firm, Non-tender, or Matted)"],
-            index=1 if "Present" in patient["cbe_nodes"] else 0
-        )
-        patient["fnac_passes"] = st.text_input("Needle Sampling Technique:", patient["fnac_passes"])
+    with tab_edit:
+        st.subheader(f"Demographic & Clinical Profile: {patient['name']} ({patient['case_id']})")
+        
+        with st.expander("✏️ Edit Demographics & Registration Details", expanded=False):
+            ed1, ed2, ed3 = st.columns(3)
+            patient["name"] = ed1.text_input("Patient Full Name:", patient["name"])
+            patient["age"] = ed2.number_input("Age:", 15, 100, int(patient["age"]))
+            patient["uhid"] = ed3.text_input("UHID:", patient["uhid"])
+            patient["pincode"] = ed1.text_input("Pincode / Area:", patient["pincode"])
+            patient["referral_doc"] = ed2.text_input("Examining MO:", patient["referral_doc"])
+            if st.button("Save Profile Changes"):
+                patient["audit_log"].append(f"[{datetime.date.today()}] Demographics updated by Medical Officer")
+                st.success("Patient demographics updated.")
 
-    with col_right:
-        st.markdown("#### Bedside Ultrasound (POCUS)")
-        patient["pocus_available"] = st.checkbox("Ultrasound Machine Available at Clinic?", value=patient["pocus_available"])
-        if patient["pocus_available"]:
-            patient["pocus_orientation"] = st.radio(
-                "Lesion Orientation:",
-                ["Wider-than-tall (Horizontal / Parallel to skin)", "Taller-than-wide (Vertical growth / Transverse to skin)"],
-                index=1 if "Taller" in patient["pocus_orientation"] else 0
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.markdown("#### Standardized Clinical Palpation (CBE)")
+            patient["cbe_mass"] = st.selectbox(
+                "Mass Consistency & Fixity:",
+                [
+                    "Soft / Rubbery, Well-circumscribed, Freely mobile",
+                    "Firm, Discrete, Moderately mobile",
+                    "Hard, Irregular (Tethered/Fixed to skin or fascia)"
+                ],
+                index=2 if "Hard" in patient["cbe_mass"] else (1 if "Firm" in patient["cbe_mass"] else 0)
             )
-            patient["pocus_margins"] = st.radio(
-                "Margin Integrity:",
-                ["Smooth & Well-defined", "Irregular / Spiculated / Microlobulated"],
-                index=1 if "Irregular" in patient["pocus_margins"] else 0
+            patient["cbe_size"] = st.text_input("Approximate Mass Diameter (cm):", patient["cbe_size"])
+            patient["cbe_nodes"] = st.selectbox(
+                "Ipsilateral Axillary Adenopathy:",
+                ["Absent (Clinically negative)", "Present (Firm, Non-tender, or Matted)"],
+                index=1 if "Present" in patient["cbe_nodes"] else 0
             )
-            patient["pocus_posterior"] = st.radio(
-                "Posterior Feature:",
-                ["Posterior acoustic enhancement (or neutral)", "Posterior acoustic shadowing (dark shadow behind mass)"],
-                index=1 if "shadowing" in patient["pocus_posterior"] else 0
-            )
-        else:
-            st.info("POCUS bypassed. Concordance engine will assess Clinical Suspicion + Cytology.")
+            patient["fnac_passes"] = st.text_input("Needle Sampling Technique:", patient["fnac_passes"])
 
-    st.divider()
-    st.markdown("#### Optional Direct Micrograph Upload by Medical Officer")
-    st.caption("Use this if the Medical Officer processes the microscope slide directly.")
-    mo_direct_upload = st.file_uploader(
-        "Upload Slide Photos directly as Medical Officer (10x Overview & 40x Nuclear Detail):",
-        type=["jpg", "png", "jpeg"],
-        accept_multiple_files=True,
-        key="mo_uploader"
-    )
-    if mo_direct_upload:
-        patient["tele_images"] = mo_direct_upload
-        patient["image_uploader_role"] = "Medical Officer"
-        patient["image_uploader_name"] = patient["referral_doc"]
-        log_entry = f"[{datetime.date.today()}] {len(mo_direct_upload)} slide image(s) uploaded directly by MO ({patient['referral_doc']})"
-        if log_entry not in patient["audit_log"]:
-            patient["audit_log"].append(log_entry)
-        st.success(f"Attached {len(mo_direct_upload)} image(s) to {patient['case_id']} as Medical Officer.")
+        with col_right:
+            st.markdown("#### Bedside Ultrasound (POCUS)")
+            patient["pocus_available"] = st.checkbox("Ultrasound Machine Available at Clinic?", value=patient["pocus_available"])
+            if patient["pocus_available"]:
+                patient["pocus_orientation"] = st.radio(
+                    "Lesion Orientation:",
+                    ["Wider-than-tall (Horizontal / Parallel to skin)", "Taller-than-wide (Vertical growth / Transverse to skin)"],
+                    index=1 if "Taller" in patient["pocus_orientation"] else 0
+                )
+                patient["pocus_margins"] = st.radio(
+                    "Margin Integrity:",
+                    ["Smooth & Well-defined", "Irregular / Spiculated / Microlobulated"],
+                    index=1 if "Irregular" in patient["pocus_margins"] else 0
+                )
+                patient["pocus_posterior"] = st.radio(
+                    "Posterior Acoustic Feature:",
+                    ["Posterior acoustic enhancement (or neutral)", "Posterior acoustic shadowing (dark shadow behind mass)"],
+                    index=1 if "shadowing" in patient["pocus_posterior"] else 0
+                )
+            else:
+                st.info("POCUS bypassed. Concordance engine will assess Clinical Suspicion + Cytology.")
+
+        st.divider()
+        st.markdown("#### Direct Micrograph Upload by Medical Officer")
+        st.caption("Photos uploaded here are appended to the slide pool without overwriting technician uploads.")
+        mo_new_files = st.file_uploader(
+            "Add Slide Photos as Medical Officer (10x Overview & 40x Detail):",
+            type=["jpg", "png", "jpeg"],
+            accept_multiple_files=True,
+            key="mo_img_uploader"
+        )
+        if mo_new_files:
+            if st.button("Append MO Uploads to Patient Record"):
+                for uploaded in mo_new_files:
+                    patient["images"].append({
+                        "file": uploaded,
+                        "role": "Medical Officer",
+                        "uploader": patient["referral_doc"],
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    })
+                patient["audit_log"].append(f"[{datetime.date.today()}] {len(mo_new_files)} photo(s) added by MO ({patient['referral_doc']})")
+                st.success(f"Added {len(mo_new_files)} photo(s). Total attached: {len(patient['images'])}")
+                st.rerun()
+
+    # Gallery display
+    if patient["images"]:
+        st.divider()
+        st.markdown(f"#### All Attached Slide Micrographs ({len(patient['images'])} total)")
+        img_cols = st.columns(min(len(patient["images"]), 4))
+        for idx, item in enumerate(patient["images"]):
+            with img_cols[idx % 4]:
+                st.image(Image.open(item["file"]), caption=f"Field {idx+1} (By: {item['role']} - {item['uploader']})", use_container_width=True)
 
 # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
     st.header("2. Laboratory Technician: Slide Staining & Tele-Imaging")
-    st.caption("Select an existing patient registered by the MO to link the prepared slide and smartphone micrographs.")
+    st.caption("Select a registered patient, record staining adequacy, and append smartphone microscope photos.")
 
     st.subheader("Step 1: Link to Registered Patient")
     target_case_id = st.selectbox(
-        "Select Patient to Attach Cytology Findings:",
+        "Select Patient to Attach Staining & Cytology Images:",
         options=case_options,
         index=case_options.index(st.session_state.active_case_id),
         format_func=lambda cid: f"{cid} — {st.session_state.patients[cid]['name']} (UHID: {st.session_state.patients[cid]['uhid']})"
@@ -236,89 +276,141 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
         )
 
     with col2:
-        st.markdown("#### Smartphone Photomicrograph Upload")
-        st.caption("Attach photos captured through the microscope eyepiece adapter (10x and 40x).")
-        tech_uploads = st.file_uploader(
-            f"Attach Slide Photos to Case {patient['case_id']}:",
+        st.markdown("#### Smartphone Micrograph Upload (Additive)")
+        st.caption("Upload photos captured with the eyepiece adapter. These will be added alongside any MO uploads.")
+        tech_new_files = st.file_uploader(
+            f"Add Slide Photos as Lab Technician:",
             type=["jpg", "png", "jpeg"],
             accept_multiple_files=True,
-            key="tech_uploader"
+            key="tech_img_uploader"
         )
-        if tech_uploads:
-            patient["tele_images"] = tech_uploads
-            patient["image_uploader_role"] = "Lab Technician"
-            patient["image_uploader_name"] = patient["prep_tech"]
-            log_entry = f"[{datetime.date.today()}] {len(tech_uploads)} slide image(s) uploaded by Tech ({patient['prep_tech']})"
-            if log_entry not in patient["audit_log"]:
-                patient["audit_log"].append(log_entry)
-            st.success(f"Attached {len(tech_uploads)} image(s) to Case {patient['case_id']}.")
+        if tech_new_files:
+            if st.button("Append Tech Uploads to Patient Record"):
+                for uploaded in tech_new_files:
+                    patient["images"].append({
+                        "file": uploaded,
+                        "role": "Lab Technician",
+                        "uploader": patient["prep_tech"],
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    })
+                patient["audit_log"].append(f"[{datetime.date.today()}] {len(tech_new_files)} photo(s) added by Tech ({patient['prep_tech']})")
+                st.success(f"Added {len(tech_new_files)} photo(s). Total attached: {len(patient['images'])}")
+                st.rerun()
 
-    if patient["tele_images"]:
+    if patient["images"]:
         st.divider()
-        st.markdown(f"#### Micrographs Attached to Case `{patient['case_id']}` (Uploaded by {patient['image_uploader_role']}: {patient['image_uploader_name']})")
-        cols = st.columns(min(len(patient["tele_images"]), 4))
-        for idx, img_file in enumerate(patient["tele_images"]):
-            with cols[idx % 4]:
-                st.image(Image.open(img_file), caption=f"Field {idx+1}", use_container_width=True)
+        st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
+        img_cols = st.columns(min(len(patient["images"]), 4))
+        for idx, item in enumerate(patient["images"]):
+            with img_cols[idx % 4]:
+                st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}: {item['uploader']}]", use_container_width=True)
 
 # ==========================================
-# MODULE 3: PATHOLOGIST
+# MODULE 3: CYTOLOGY REVIEW & AI ASSIST
 # ==========================================
-elif role == "3. Accessing Pathologist (Consolidated Tele-Review)":
-    st.header("3. Accessing Pathologist: Consolidated Tele-Review")
-    st.caption("Examine patient clinical staging, review uploaded micrographs, and categorize using the IAC Yokohama System.")
+elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
+    st.header("3. Slide Review & Diagnostic Classification")
+    st.caption("Review uploaded slide fields using either Pathologist Tele-Review or the AI Provisional Assist bypass.")
 
     st.subheader(f"Case Under Review: {patient['name']} | Case ID: {patient['case_id']}")
 
-    col_summary, col_review = st.columns([1, 1])
+    col_images, col_diag = st.columns([1, 1])
 
-    with col_summary:
-        st.markdown("#### Consolidated Clinical & Slide Intake")
+    with col_images:
+        st.markdown("#### Clinical Context & Slide Intake")
         st.markdown(f"""
         * **Patient:** {patient['name']} ({patient['age']} yrs) | **UHID:** `{patient['uhid']}`
         * **Examining Medical Officer:** {patient['referral_doc']}
-        * **Clinical Palpation (CBE):** {patient['cbe_mass']} (Size: {patient['cbe_size']}, Nodes: {patient['cbe_nodes']})
-        * **Bedside Ultrasound (POCUS):** {'Orientation: ' + patient['pocus_orientation'] + ' | Margins: ' + patient['pocus_margins'] if patient['pocus_available'] else 'Not available on-site'}
-        * **Slide Prepared By:** {patient['prep_tech']} ({patient['staining']})
-        * **Slide Image Source:** **{patient['image_uploader_role']}** ({patient['image_uploader_name']})
+        * **Clinical Palpation:** {patient['cbe_mass']} (Size: {patient['cbe_size']}, Nodes: {patient['cbe_nodes']})
+        * **Bedside POCUS:** {'Orientation: ' + patient['pocus_orientation'] + ' | Margins: ' + patient['pocus_margins'] if patient['pocus_available'] else 'Not performed / Unavailable'}
+        * **Slide Stained By:** {patient['prep_tech']} ({patient['staining']})
+        * **Total Uploaded Micrographs:** {len(patient['images'])}
         """)
 
         st.divider()
-        st.markdown("#### Microscopic Review Fields")
-        if patient["tele_images"]:
-            st.info(f"Showing {len(patient['tele_images'])} digitized field(s) uploaded by {patient['image_uploader_role']} ({patient['image_uploader_name']}):")
-            for idx, img in enumerate(patient["tele_images"]):
-                st.image(Image.open(img), caption=f"Field {idx+1}", use_container_width=True)
+        st.markdown("#### Microscopic Field Review")
+        if patient["images"]:
+            for idx, item in enumerate(patient["images"]):
+                st.image(
+                    Image.open(item["file"]),
+                    caption=f"Field {idx+1} — Uploaded by {item['role']} ({item['uploader']}) at {item['timestamp']}",
+                    use_container_width=True
+                )
         else:
-            st.warning("⚠️ No photomicrographs have been uploaded for this patient yet.")
+            st.warning("⚠️ No slide photos uploaded yet. Technicians or the MO can attach micrographs in Module 1 or 2.")
 
-    with col_review:
-        st.markdown("#### Standardized Cytology Classification")
-        patient["pathologist"] = st.text_input("Evaluating Pathologist (Name & Degree):", patient["pathologist"])
-
-        patient["yokohama"] = st.selectbox(
-            "IAC Yokohama Category:",
-            [
-                "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
-                "Category 2: Benign Cells (Risk of Malignancy: <3%)",
-                "Category 3: Atypical (Risk of Malignancy: 15–50%)",
-                "Category 4: Suspicious for Malignancy (Risk of Malignancy: 60–85%)",
-                "Category 5: Malignant (Risk of Malignancy: >97%)"
-            ],
-            index=1 if "Category 2" in patient["yokohama"] else 0
+    with col_diag:
+        # DIAGNOSTIC ROUTE SELECTOR
+        review_choice = st.radio(
+            "Select Diagnostic Route:",
+            ["Option A: Pathologist Review (Standard)", "Option B: AI Triage Assist (Pathologist Bypass Mode)"],
+            index=0 if patient["review_mode"] == "Final Pathologist Sign-Off" else (1 if patient["review_mode"] == "AI Provisional" else 0)
         )
 
-        patient["path_notes"] = st.text_area(
-            "Microscopic Description & Cell Morphology Observations:",
-            patient["path_notes"],
-            height=140
-        )
+        if "Option B" in review_choice:
+            st.markdown("### 🤖 AI Tele-Cytology Screener (Bypass Mode)")
+            st.info(
+                "**When to use:** Use this bypass when no pathologist is available on-site or via immediate tele-consultation. "
+                "The AI predicts cell morphology for rapid triage. The report will be explicitly marked as **Provisional AI-Generated**."
+            )
 
-        if st.button("Submit Official Cytology Report"):
-            log_entry = f"[{datetime.date.today()}] Cytology finalized as {patient['yokohama'][:10]} by {patient['pathologist']}"
-            if log_entry not in patient["audit_log"]:
-                patient["audit_log"].append(log_entry)
-            st.success(f"Report signed and saved for Case {patient['case_id']}.")
+            ai_preset = st.selectbox(
+                "AI Computer-Aided Morphology Inference:",
+                [
+                    "Pattern detected: Highly cellular, cohesive antler-like sheets, bare bipolar nuclei (Consistent with Benign Fibroadenoma)",
+                    "Pattern detected: Hypocellular, proteinaceous/acellular fluid, rare ductal clusters (Inadequate sampling)",
+                    "Pattern detected: Pleomorphic cells, dyscohesive clusters, prominent nucleoli, necrotic background (High-Grade Malignancy)",
+                    "Pattern detected: Mild nuclear enlargement, crowded 3D clusters with preserved cohesion (Atypical / Indeterminate)"
+                ]
+            )
+
+            if st.button("⚡ Run AI Analysis & Generate Provisional Triage"):
+                if "Benign Fibroadenoma" in ai_preset:
+                    patient["yokohama"] = "Category 2: Benign Cells (Risk of Malignancy: <3%)"
+                    patient["path_notes"] = "[AI INFERENCE] Abundant branching cohesive sheets (antler-like), naked bipolar nuclei, and myxoid stroma. Features favor benign fibroepithelial lesion (Fibroadenoma)."
+                elif "Inadequate" in ai_preset:
+                    patient["yokohama"] = "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)"
+                    patient["path_notes"] = "[AI INFERENCE] Hypocellular smear. Insufficient intact epithelial groups for diagnostic evaluation."
+                elif "High-Grade Malignancy" in ai_preset:
+                    patient["yokohama"] = "Category 5: Malignant (Risk of Malignancy: >97%)"
+                    patient["path_notes"] = "[AI INFERENCE] Marked pleomorphism, discohesive atypical epithelial cells, and high nuclear-cytoplasmic ratio. Highly suspicious for invasive carcinoma."
+                else:
+                    patient["yokohama"] = "Category 3: Atypical (Risk of Malignancy: 15–50%)"
+                    patient["path_notes"] = "[AI INFERENCE] Architectural crowding and nuclear atypia present without definitive overt malignancy."
+
+                patient["review_mode"] = "AI Provisional"
+                patient["pathologist"] = "AI Computer-Aided Cytology Screener v1.0 (Unverified by Pathologist)"
+                patient["audit_log"].append(f"[{datetime.date.today()}] AI Provisional classification executed: {patient['yokohama'][:10]}")
+                st.success("Provisional AI classification applied. Report ready under Module 4.")
+                st.rerun()
+
+        else:
+            st.markdown("### 👨‍⚕️ Pathologist Formal Tele-Review")
+            patient["pathologist"] = st.text_input("Accessing Pathologist (Name & Degree):", patient["pathologist"])
+
+            patient["yokohama"] = st.selectbox(
+                "IAC Yokohama Diagnostic Category:",
+                [
+                    "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
+                    "Category 2: Benign Cells (Risk of Malignancy: <3%)",
+                    "Category 3: Atypical (Risk of Malignancy: 15–50%)",
+                    "Category 4: Suspicious for Malignancy (Risk of Malignancy: 60–85%)",
+                    "Category 5: Malignant (Risk of Malignancy: >97%)"
+                ],
+                index=1 if "Category 2" in patient["yokohama"] else (0 if "Category 1" in patient["yokohama"] else 2)
+            )
+
+            patient["path_notes"] = st.text_area(
+                "Microscopic Observations & Morphologic Remarks:",
+                patient["path_notes"],
+                height=130
+            )
+
+            if st.button("Submit Formal Pathologist Sign-Off"):
+                patient["review_mode"] = "Final Pathologist Sign-Off"
+                patient["audit_log"].append(f"[{datetime.date.today()}] Official cytology report signed by {patient['pathologist']} ({patient['yokohama'][:10]})")
+                st.success(f"Formal cytology report signed by {patient['pathologist']}.")
+                st.rerun()
 
 # ==========================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
@@ -326,6 +418,12 @@ elif role == "3. Accessing Pathologist (Consolidated Tele-Review)":
 elif role == "4. CDSS Triage & Advisory Report":
     st.header(f"4. CDSS Triage Advisory: {patient['name']} ({patient['case_id']})")
 
+    # Review status badge
+    is_ai_mode = patient["review_mode"] == "AI Provisional"
+    if is_ai_mode:
+        st.warning("⚠️ **NOTICE: THIS REPORT USES PROVISIONAL AI CYTOLOGY INFERENCE. AWAITING PATHOLOGIST REVIEW.**")
+
+    # Clinical Risk Calculation
     cbe_suspicious = "Hard, Irregular" in patient["cbe_mass"] or "Present" in patient["cbe_nodes"]
     usg_suspicious = False
     if patient["pocus_available"]:
@@ -338,54 +436,91 @@ elif role == "4. CDSS Triage & Advisory Report":
     clinical_high_risk = cbe_suspicious or usg_suspicious
     yokohama = patient["yokohama"]
 
+    # Concordance Engine Logic (with Desmoplastic High-Risk Inadequacy Split)
     if clinical_high_risk and "Category 2: Benign" in yokohama:
         status_banner = "CRITICAL DISCORDANCE (HIGH RISK FLAGS)"
         status_color = "red"
         analysis_text = (
-            "Physical examination and/or bedside ultrasound demonstrate high-suspicion features, "
-            "yet fine-needle aspiration cytology is reported as benign. FNAB has a recognized false-negative "
-            "rate due to geographic sampling misses in dense or scirrhous tumors. "
-            "Residual post-test malignancy risk remains approximately ~20%–30%."
+            "Physical examination and/or bedside ultrasound demonstrate high-suspicion features (e.g. hard mass, "
+            "taller-than-wide orientation, or acoustic shadowing), yet cytology is reported as benign. FNAB has a recognized "
+            "sampling miss rate in dense, fibrous, or scirrhous tumors. Residual post-test malignancy risk remains ~20%–30%."
         )
-        action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy or reassuring the patient is unsafe."
-    elif "Category 1: Insufficient" in yokohama:
-        status_banner = "INSUFFICIENT SAMPLING (INDETERMINATE)"
+        action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy based on benign cytology alone is unsafe."
+
+    elif clinical_high_risk and "Category 1: Insufficient" in yokohama:
+        status_banner = "HIGH-RISK INADEQUACY (SUSPECTED DESMOPLASTIC MASS)"
+        status_color = "red"
+        analysis_text = (
+            "Bedside ultrasound or clinical palpation indicates high suspicion, but needle cytology yielded inadequate cellularity. "
+            "Invasive carcinomas with dense fibrous stroma (desmoplasia) frequently produce hypocellular aspirates or 'dry taps'. "
+            "An inadequate smear in this clinical setting must be managed with high suspicion."
+        )
+        action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY (CNB). Repeat fine-needle passes frequently fail in dense fibrous tumors."
+
+    elif not clinical_high_risk and "Category 1: Insufficient" in yokohama:
+        status_banner = "INSUFFICIENT SAMPLING (LOW CLINICAL SUSPICION)"
         status_color = "orange"
         analysis_text = (
             "Cytology sample contains inadequate diagnostic epithelial groups. An inadequate smear does not "
-            "indicate an absence of malignancy (Baseline Risk of Malignancy: 10%–25%)."
+            "confirm absence of disease (Baseline Risk of Malignancy: 10%–25%)."
         )
-        action_text = "REPEAT GUIDED FNAB OR PROCEED DIRECTLY TO CORE BIOPSY based on clinical suspicion."
+        action_text = "REPEAT GUIDED FNAB OR REFER FOR DIAGNOSTIC BREAST ULTRASOUND within 2–3 weeks."
+
     elif "Category 4: Suspicious" in yokohama or "Category 5: Malignant" in yokohama:
         status_banner = "CONCORDANT SUSPICIOUS / MALIGNANT PROFILE"
         status_color = "red"
         analysis_text = "Cytomorphological features unequivocally identify or strongly favor neoplasia (Risk of Malignancy: 60% to >97%)."
         action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 biomarker profiling) and definitive oncology staging."
+
     elif "Category 3: Atypical" in yokohama:
         status_banner = "ATYPICAL CYTOLOGY (EQUIVOCAL)"
         status_color = "orange"
         analysis_text = "Smear exhibits architectural or nuclear atypia (Risk of Malignancy: 15%–50%)."
         action_text = "REFER FOR HISTOPATHOLOGIC EVALUATION (Core-Needle Biopsy or diagnostic excision)."
+
     else:
         status_banner = "CONCORDANT BENIGN PROFILE"
         status_color = "green"
         analysis_text = "Physical examination, bedside sonography, and cytology findings align without suspicious features."
-        action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on warning signs."
+        action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on self-awareness warning signs."
 
+    # Render Screen CDSS Banner
+    prefix = "[PROVISIONAL AI ASSIST] " if is_ai_mode else ""
     if status_color == "red":
-        st.error(f"🚨 **{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+        st.error(f"🚨 **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
     elif status_color == "orange":
-        st.warning(f"⚠️ **{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+        st.warning(f"⚠️ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
     else:
-        st.success(f"✅ **{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+        st.success(f"✅ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
 
     st.divider()
     st.subheader("Formal Monochromatic Clinical Advisory Slip")
     st.caption("Standardized print-ready report detailing complete chain of custody.")
 
     p = patient
+    ai_watermark = """
+    <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 8px; text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 12px;">
+        ⚠️ PRELIMINARY AI-ASSISTED TRIAGE REPORT — PATHOLOGIST HAS NOT YET REVIEWED THIS SLIDE. FORMAL TELE-PATHOLOGY SIGN-OFF PENDING.
+    </div>
+    """ if is_ai_mode else ""
+
+    sign_off_html = f"""
+    <td style="width: 25%; text-align: center;">
+        <span style="font-style: italic; color: #856404;">[AI Provisional]</span><br>
+        ________________________<br>
+        <strong>AI Cytology Screener</strong>
+    </td>
+    """ if is_ai_mode else f"""
+    <td style="width: 25%; text-align: center;">
+        ________________________<br>
+        <strong>Pathologist Sign-off</strong><br>
+        <span style="font-size: 11px;">{p['pathologist']}</span>
+    </td>
+    """
+
     report_html = f"""
-    <div style="border: 2px solid #222; padding: 24px; font-family: Arial, sans-serif; color: #111; background-color: #fff; line-heigh: 1.4;">
+    <div style="border: 2px solid #222; padding: 24px; font-family: Arial, sans-serif; color: #111; background-color: #fff; line-height: 1.4;">
+        {ai_watermark}
         <div style="text-align: center; border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 16px;">
             <h2 style="margin: 0; text-transform: uppercase; letter-spacing: 1px;">PERIPHERAL BREAST TRIAGE UNIT</h2>
             <div style="font-size: 13px; font-weight: bold; color: #444;">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
@@ -417,14 +552,15 @@ elif role == "4. CDSS Triage & Advisory Report":
             <strong>2. CYTOLOGY & TELE-PATHOLOGY CHAIN OF CUSTODY</strong><br>
             • <strong>Procedure:</strong> {p['fnac_passes']}<br>
             • <strong>Slide Stained By:</strong> {p['prep_tech']} ({p['staining']}) | Macro Adequacy: {p['macro_adequate']}<br>
-            • <strong>Micrograph Captured & Uploaded By:</strong> {p['image_uploader_role']} — {p['image_uploader_name']} ({len(p['tele_images'])} photos)<br>
+            • <strong>Total Micrographs Attached:</strong> {len(p['images'])} slide image(s)<br>
             • <strong>IAC Yokohama Category:</strong> <span style="text-decoration: underline; font-weight: bold;">{p['yokohama']}</span><br>
-            • <strong>Pathologist Observations:</strong> {p['path_notes']}<br>
-            • <strong>Evaluating Pathologist:</strong> {p['pathologist']}
+            • <strong>Diagnostic Assessment Mode:</strong> {p['review_mode']}<br>
+            • <strong>Cytology Observations:</strong> {p['path_notes']}<br>
+            • <strong>Reviewer / Engine:</strong> {p['pathologist']}
         </div>
 
         <div style="border: 2px solid #111; padding: 10px; margin-bottom: 14px; background-color: #f9f9f9; font-size: 13px;">
-            <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE & CONFIRMATORY ADVISORY: {status_banner}</div>
+            <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE & CONFIRMATORY ADVISORY: {prefix}{status_banner}</div>
             <p style="margin: 4px 0;"><strong>Analysis:</strong> {analysis_text}</p>
             <p style="margin: 4px 0;"><strong>Mandatory Directive:</strong> <strong>{action_text}</strong></p>
         </div>
@@ -438,12 +574,10 @@ elif role == "4. CDSS Triage & Advisory Report":
                 </td>
                 <td style="width: 25%; text-align: center;">
                     ________________________<br>
-                    <strong>Medical Officer Sign-off</strong>
+                    <strong>Medical Officer Sign-off</strong><br>
+                    <span style="font-size: 11px;">{p['referral_doc']}</span>
                 </td>
-                <td style="width: 25%; text-align: center;">
-                    ________________________<br>
-                    <strong>Pathologist Sign-off</strong>
-                </td>
+                {sign_off_html}
             </tr>
         </table>
 
@@ -452,7 +586,7 @@ elif role == "4. CDSS Triage & Advisory Report":
         </div>
     </div>
     """
-    components.html(report_html, height=540, scrolling=True)
+    components.html(report_html, height=560, scrolling=True)
 
 # ==========================================
 # MODULE 5: ASHA CLOSED-LOOP TRACKER
@@ -505,27 +639,27 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
 
     st.markdown("#### Summary of Clinical Roles Involved")
     summary_data = {
-        "Action": [
+        "Clinical Stage": [
             "Clinical Palpation & POCUS",
             "Needle Sampling (FNAC)",
             "Slide Smear & Staining",
-            "Photomicrograph Upload",
-            "Yokohama Cytology Assessment",
+            "Micrographs Attached",
+            "Cytology Assessment",
             "Community Adherence Tracking"
         ],
         "Cadre": [
             "Medical Officer",
             "Medical Officer",
             "Lab Technician",
-            patient["image_uploader_role"],
-            "Consulting Pathologist",
+            "Collaborative (MO / Tech)",
+            "AI Engine" if patient["review_mode"] == "AI Provisional" else "Consulting Pathologist",
             "ASHA / ANM Worker"
         ],
-        "Individual Responsible": [
+        "Entity / Name": [
             patient["referral_doc"],
             patient["referral_doc"],
             patient["prep_tech"],
-            patient["image_uploader_name"],
+            f"{len(patient['images'])} photos total",
             patient["pathologist"],
             patient["asha_worker"]
         ]
@@ -535,5 +669,3 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
     st.markdown("#### Chronological Activity Log")
     for log_item in patient["audit_log"]:
         st.code(log_item, language="markdown")
-
-
