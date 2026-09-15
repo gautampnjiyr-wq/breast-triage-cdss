@@ -70,7 +70,7 @@ def fetch_patient_registry():
                 "review_mode": "Final Pathologist Sign-Off",
                 "pathologist": "Dr. Priya Sharma, MD Pathology",
                 "yokohama": "Category 2: Benign Cells (Risk of Malignancy: <3%)",
-                "path_notes": "Abundant naked bipolar nuclei with sheets of cohesive benign ductal epithelial cells. No marked atypia in viewed fields.",
+                "path_notes": "Abundant naked bipolar nuclei with sheets of cohesive benign ductal epithelial cells.",
                 "asha_worker": "Meena Devi (ANM/ASHA)",
                 "asha_contact": "+91 9876543210",
                 "tracker_status": "Referral Pending (Counseling completed at PHC)",
@@ -123,6 +123,15 @@ def save_slide_image(file_obj, case_id, role, uploader_name):
         "timestamp": timestamp_str
     }
 
+# Helper: Delete photo from cloud bucket
+def delete_slide_image(image_item):
+    if HAS_SUPABASE and "url" in image_item:
+        try:
+            filename = image_item["url"].split("/")[-1]
+            supabase.storage.from_("slide-micrographs").remove([filename])
+        except Exception as e:
+            st.error(f"Cloud storage deletion error: {e}")
+
 # Sync Data
 st.session_state.patients = fetch_patient_registry()
 
@@ -174,7 +183,7 @@ role = st.sidebar.radio(
 # ==========================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
     st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
-    st.caption("Register patients, edit existing demographics, record clinical exams, and upload micrographs.")
+    st.caption("Register patients, record clinical exams, upload micrographs, and manage slide records.")
 
     tab_edit, tab_register = st.tabs(["📝 View / Edit Current Patient", "➕ Register New Patient"])
 
@@ -288,7 +297,6 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
 
         st.divider()
         st.markdown("#### Direct Micrograph Upload by Medical Officer")
-        st.caption("Photos uploaded here are appended to the slide repository.")
         mo_new_files = st.file_uploader(
             "Add Slide Photos as Medical Officer (10x & 40x):",
             type=["jpg", "png", "jpeg"],
@@ -302,9 +310,10 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     patient["images"].append(img_entry)
                 patient["audit_log"].append(f"[{datetime.date.today()}] {len(mo_new_files)} photo(s) uploaded by MO")
                 save_patient_record(patient)
-                st.success(f"Attached {len(mo_new_files)} photo(s). Total available: {len(patient['images'])}")
+                st.success(f"Attached {len(mo_new_files)} photo(s).")
                 st.rerun()
 
+    # Gallery display with deletion in MO Module
     if patient.get("images"):
         st.divider()
         st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
@@ -315,12 +324,22 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
                 elif "file" in item:
                     st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                
+                if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
+                    delete_slide_image(item)
+                    patient["images"].pop(idx)
+                    patient["audit_log"].append(
+                        f"[{datetime.date.today()}] Slide image #{idx+1} removed by MO ({patient['referral_doc']})"
+                    )
+                    save_patient_record(patient)
+                    st.success(f"Field #{idx+1} deleted.")
+                    st.rerun()
                     # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
     st.header("2. Laboratory Technician: Slide Staining & Tele-Imaging")
-    st.caption("Select a registered patient, record staining adequacy, and append microscope photos.")
+    st.caption("Select a registered patient, record staining adequacy, append microscope photos, and manage uploads.")
 
     st.subheader("Step 1: Link to Registered Patient")
     target_case_id = st.selectbox(
@@ -378,6 +397,7 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                 st.success(f"Attached {len(tech_new_files)} photos.")
                 st.rerun()
 
+    # Gallery display with deletion in Tech Module
     if patient.get("images"):
         st.divider()
         st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
@@ -388,6 +408,16 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                     st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
                 elif "file" in item:
                     st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+
+                if st.button(f"🗑️ Delete #{idx+1}", key=f"tech_del_img_{patient['case_id']}_{idx}"):
+                    delete_slide_image(item)
+                    patient["images"].pop(idx)
+                    patient["audit_log"].append(
+                        f"[{datetime.date.today()}] Slide image #{idx+1} removed by Tech ({patient['prep_tech']})"
+                    )
+                    save_patient_record(patient)
+                    st.success(f"Field #{idx+1} deleted.")
+                    st.rerun()
 
 # ==========================================
 # MODULE 3: CYTOLOGY REVIEW & AI ASSIST
@@ -456,7 +486,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                     patient["path_notes"] = "[AI INFERENCE] Hypocellular smear. Insufficient intact epithelial groups for diagnostic evaluation."
                 elif "High-Grade Malignancy" in ai_preset:
                     patient["yokohama"] = "Category 5: Malignant (Risk of Malignancy: >97%)"
-                    patient["path_notes"] = "[AI INFERENCE] Marked pleomorphism, discohesive atypical epithelial cells, and high nuclear-cytoplasmic ratio. Highly suspicious for invasive carcinoma."
+                    patient["path_notes"] = "[AI INFERENCE] Marked pleomorphism, discohesive atypical epithelial cells, and high nuclear-cytoplasmic ratio. Suspicious for invasive carcinoma."
                 else:
                     patient["yokohama"] = "Category 3: Atypical (Risk of Malignancy: 15–50%)"
                     patient["path_notes"] = "[AI INFERENCE] Architectural crowding and nuclear atypia present without definitive overt malignancy."
@@ -496,8 +526,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                 save_patient_record(patient)
                 st.success("Official cytology report saved to database.")
                 st.rerun()
-
-# ==========================================
+                # ==========================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
 # ==========================================
 elif role == "4. CDSS Triage & Advisory Report":
@@ -535,25 +564,22 @@ elif role == "4. CDSS Triage & Advisory Report":
         status_color = "red"
         analysis_text = (
             "Bedside ultrasound or clinical palpation indicates high suspicion, but needle cytology yielded inadequate cellularity. "
-            "Invasive carcinomas with dense fibrous stroma (desmoplasia) frequently produce hypocellular aspirates or 'dry taps'. "
+            "Invasive carcinomas with dense fibrous stroma frequently produce hypocellular aspirates. "
             "An inadequate smear in this setting must be managed with high suspicion."
         )
-        action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY (CNB). Repeat fine-needle passes frequently fail in dense fibrous tumors."
+        action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY (CNB)."
 
     elif not clinical_high_risk and "Category 1: Insufficient" in yokohama:
         status_banner = "INSUFFICIENT SAMPLING (LOW CLINICAL SUSPICION)"
         status_color = "orange"
-        analysis_text = (
-            "Cytology sample contains inadequate diagnostic epithelial groups. An inadequate smear does not "
-            "confirm absence of disease (Baseline Risk of Malignancy: 10%–25%)."
-        )
+        analysis_text = "Cytology sample contains inadequate diagnostic epithelial groups (Baseline Risk: 10%–25%)."
         action_text = "REPEAT GUIDED FNAB OR REFER FOR DIAGNOSTIC BREAST ULTRASOUND within 2–3 weeks."
 
     elif "Category 4: Suspicious" in yokohama or "Category 5: Malignant" in yokohama:
         status_banner = "CONCORDANT SUSPICIOUS / MALIGNANT PROFILE"
         status_color = "red"
-        analysis_text = "Cytomorphological features unequivocally identify or strongly favor neoplasia (Risk of Malignancy: 60% to >97%)."
-        action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 biomarker profiling) and definitive oncology staging."
+        analysis_text = "Cytomorphological features unequivocally identify or strongly favor neoplasia (Risk: 60% to >97%)."
+        action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 profiling) and definitive oncology staging."
 
     elif "Category 3: Atypical" in yokohama:
         status_banner = "ATYPICAL CYTOLOGY (EQUIVOCAL)"
@@ -580,94 +606,164 @@ elif role == "4. CDSS Triage & Advisory Report":
 
     p = patient
     ai_watermark = """
-    <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 8px; text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 12px;">
+    <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; text-align: center; font-weight: bold; margin-bottom: 14px; font-size: 13px; border-radius: 4px;">
         ⚠️ PRELIMINARY AI-ASSISTED TRIAGE REPORT — PATHOLOGIST HAS NOT YET REVIEWED THIS SLIDE. FORMAL TELE-PATHOLOGY SIGN-OFF PENDING.
     </div>
     """ if is_ai_mode else ""
 
     sign_off_html = f"""
-    <td style="width: 25%; text-align: center;">
-        <span style="font-style: italic; color: #856404;">[AI Provisional]</span><br>
-        ________________________<br>
+    <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
+        <span style="font-style: italic; color: #856404; font-size: 11px;">[AI Provisional]</span><br>
+        <div style="border-bottom: 1px solid #111; margin: 8px 15px 4px 15px;"></div>
         <strong>AI Cytology Screener</strong>
-    </td>
+    </div>
     """ if is_ai_mode else f"""
-    <td style="width: 25%; text-align: center;">
-        ________________________<br>
+    <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
+        <div style="border-bottom: 1px solid #111; margin: 18px 15px 4px 15px;"></div>
         <strong>Pathologist Sign-off</strong><br>
         <span style="font-size: 11px;">{p.get('pathologist','')}</span>
-    </td>
+    </div>
     """
 
     report_html = f"""
-    <div style="border: 2px solid #222; padding: 24px; font-family: Arial, sans-serif; color: #111; background-color: #fff; line-height: 1.4;">
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 10px; background: transparent; }}
+        .slip-card {{
+            border: 2px solid #222;
+            padding: 20px;
+            background-color: #ffffff;
+            max-width: 800px;
+            margin: auto;
+            line-height: 1.45;
+        }}
+        .header {{ text-align: center; border-bottom: 2px solid #222; padding-bottom: 10px; margin-bottom: 14px; }}
+        .header h2 {{ margin: 0; font-size: 18px; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .header .sub {{ font-size: 12px; font-weight: bold; color: #444; margin-top: 3px; }}
+        .demo-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 6px 12px;
+            font-size: 13px;
+            margin-bottom: 14px;
+            background: #fbfbfb;
+            padding: 10px;
+            border-radius: 4px;
+        }}
+        .section-box {{
+            border-top: 1px solid #888;
+            padding: 10px 0;
+            font-size: 13px;
+        }}
+        .advisory-box {{
+            border: 2px solid #111;
+            padding: 12px;
+            margin: 14px 0;
+            background-color: #f8f9fa;
+            font-size: 13px;
+        }}
+        .footer-signatures {{
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 16px;
+            margin-top: 20px;
+            font-size: 12px;
+        }}
+        .print-btn {{
+            display: block;
+            width: 100%;
+            max-width: 220px;
+            margin: 0 auto 15px auto;
+            padding: 10px;
+            background-color: #0f172a;
+            color: #ffffff;
+            text-align: center;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            text-decoration: none;
+            border: none;
+        }}
+        @media print {{
+            .print-btn {{ display: none; }}
+            body {{ padding: 0; }}
+            .slip-card {{ border: 1px solid #000; padding: 15px; width: 100%; }}
+        }}
+    </style>
+    </head>
+    <body>
+
+    <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+
+    <div class="slip-card">
         {ai_watermark}
-        <div style="text-align: center; border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 16px;">
-            <h2 style="margin: 0; text-transform: uppercase; letter-spacing: 1px;">PERIPHERAL BREAST TRIAGE UNIT</h2>
-            <div style="font-size: 13px; font-weight: bold; color: #444;">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
+        <div class="header">
+            <h2>PERIPHERAL BREAST TRIAGE UNIT</h2>
+            <div class="sub">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
         </div>
 
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px;">
-            <tr>
-                <td style="padding: 3px 0;"><strong>Patient Name:</strong> {p['name']}</td>
-                <td style="padding: 3px 0;"><strong>Age / Sex:</strong> {p['age']} / Female</td>
-                <td style="padding: 3px 0;"><strong>Case ID:</strong> {p['case_id']}</td>
-            </tr>
-            <tr>
-                <td style="padding: 3px 0;"><strong>UHID:</strong> {p['uhid']}</td>
-                <td style="padding: 3px 0;"><strong>Exam Date:</strong> {p['date_exam']}</td>
-                <td style="padding: 3px 0;"><strong>Pincode:</strong> {p['pincode']}</td>
-            </tr>
-            <tr>
-                <td colspan="3" style="padding: 3px 0;"><strong>Examining Medical Officer:</strong> {p['referral_doc']}</td>
-            </tr>
-        </table>
+        <div class="demo-grid">
+            <div><strong>Patient:</strong> {p['name']}</div>
+            <div><strong>Age/Sex:</strong> {p['age']}y / Female</div>
+            <div><strong>Case ID:</strong> {p['case_id']}</div>
+            <div><strong>UHID:</strong> {p['uhid']}</div>
+            <div><strong>Exam Date:</strong> {p['date_exam']}</div>
+            <div><strong>Pincode:</strong> {p['pincode']}</div>
+            <div style="grid-column: 1 / -1;"><strong>Examining MO:</strong> {p['referral_doc']}</div>
+        </div>
 
-        <div style="border-top: 1px solid #777; padding-top: 8px; margin-bottom: 12px; font-size: 13px;">
+        <div class="section-box">
             <strong>1. BEDSIDE CLINICAL & ULTRASOUND ASSESSMENT</strong><br>
-            • <strong>Clinical Palpation (CBE):</strong> {p['cbe_mass']} | Size: {p['cbe_size']} | Axillary Nodes: {p['cbe_nodes']}<br>
-            • <strong>Point-of-Care USG (POCUS):</strong> {'Orientation: ' + p['pocus_orientation'] + ' | Margins: ' + p['pocus_margins'] + ' | ' + p['pocus_posterior'] if p['pocus_available'] else 'Not Performed / Unavailable'}
+            • <strong>Palpation (CBE):</strong> {p['cbe_mass']} | Size: {p['cbe_size']} | Axillary Nodes: {p['cbe_nodes']}<br>
+            • <strong>POCUS:</strong> {'Orientation: ' + p['pocus_orientation'] + ' | Margins: ' + p['pocus_margins'] + ' | ' + p['pocus_posterior'] if p['pocus_available'] else 'Not Performed / Unavailable'}
         </div>
 
-        <div style="border-top: 1px solid #777; padding-top: 8px; margin-bottom: 12px; font-size: 13px;">
+        <div class="section-box">
             <strong>2. CYTOLOGY & TELE-PATHOLOGY CHAIN OF CUSTODY</strong><br>
             • <strong>Procedure:</strong> {p['fnac_passes']}<br>
             • <strong>Slide Stained By:</strong> {p['prep_tech']} ({p['staining']}) | Macro Adequacy: {p['macro_adequate']}<br>
-            • <strong>Total Micrographs Attached:</strong> {len(p.get('images', []))} slide image(s)<br>
-            • <strong>IAC Yokohama Category:</strong> <span style="text-decoration: underline; font-weight: bold;">{p['yokohama']}</span><br>
-            • <strong>Diagnostic Assessment Mode:</strong> {p.get('review_mode','Final')}<br>
-            • <strong>Cytology Observations:</strong> {p['path_notes']}<br>
-            • <strong>Reviewer / Engine:</strong> {p.get('pathologist','')}
+            • <strong>Micrographs:</strong> {len(p.get('images', []))} attached image(s)<br>
+            • <strong>IAC Yokohama:</strong> <span style="text-decoration: underline; font-weight: bold;">{p['yokohama']}</span><br>
+            • <strong>Assessment Mode:</strong> {p.get('review_mode','Final')}<br>
+            • <strong>Observations:</strong> {p['path_notes']}<br>
+            • <strong>Reviewer:</strong> {p.get('pathologist','')}
         </div>
 
-        <div style="border: 2px solid #111; padding: 10px; margin-bottom: 14px; background-color: #f9f9f9; font-size: 13px;">
+        <div class="advisory-box">
             <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE & CONFIRMATORY ADVISORY: {prefix}{status_banner}</div>
-            <p style="margin: 4px 0;"><strong>Analysis:</strong> {analysis_text}</p>
-            <p style="margin: 4px 0;"><strong>Mandatory Directive:</strong> <strong>{action_text}</strong></p>
+            <p style="margin: 6px 0 3px 0;"><strong>Analysis:</strong> {analysis_text}</p>
+            <p style="margin: 3px 0;"><strong>Directive:</strong> <strong>{action_text}</strong></p>
         </div>
 
-        <table style="width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 12px;">
-            <tr>
-                <td style="width: 50%;">
-                    <strong>Community Follow-Up Tracker:</strong><br>
-                    Assigned ASHA/ANM: {p['asha_worker']} ({p['asha_contact']})<br>
-                    Follow-Up Safety Window: 21 Days
-                </td>
-                <td style="width: 25%; text-align: center;">
-                    ________________________<br>
-                    <strong>Medical Officer Sign-off</strong><br>
-                    <span style="font-size: 11px;">{p['referral_doc']}</span>
-                </td>
-                {sign_off_html}
-            </tr>
-        </table>
+        <div class="footer-signatures">
+            <div style="flex: 1.2; min-width: 180px;">
+                <strong>Community Tracker:</strong><br>
+                ASHA: {p['asha_worker']} ({p['asha_contact']})<br>
+                Safety Window: 21 Days
+            </div>
+            <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
+                <div style="border-bottom: 1px solid #111; margin: 18px 15px 4px 15px;"></div>
+                <strong>MO Sign-off</strong><br>
+                <span style="font-size: 11px;">{p['referral_doc']}</span>
+            </div>
+            {sign_off_html}
+        </div>
 
-        <div style="border-top: 2px solid #222; margin-top: 16px; padding-top: 8px; text-align: center; font-size: 12px; font-weight: bold;">
+        <div style="border-top: 2px solid #222; margin-top: 18px; padding-top: 8px; text-align: center; font-size: 11px; font-weight: bold;">
             **NOT DIAGNOSTIC. Triage Advisory for Clinical Decision Support. Proceed to Confirmatory Histopathology.**
         </div>
     </div>
+    </body>
+    </html>
     """
-    components.html(report_html, height=560, scrolling=True)
+    components.html(report_html, height=820, scrolling=True)
 
 # ==========================================
 # MODULE 5: ASHA CLOSED-LOOP TRACKER
