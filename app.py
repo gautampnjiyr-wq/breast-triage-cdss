@@ -1,8 +1,12 @@
 import datetime
 import uuid
+import urllib.parse
+import json
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
+import numpy as np
+import cv2
 
 st.set_page_config(
     page_title="Breast Triage CDSS",
@@ -24,6 +28,35 @@ if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
         HAS_SUPABASE = True
     except Exception as e:
         st.warning(f"Database connection warning: {e}")
+
+# Helper: OpenCV Blur & Sharpness Validator
+def evaluate_image_quality(file_obj, threshold=70.0):
+    try:
+        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
+        file_obj.seek(0)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return True, 100.0
+        laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
+        return (laplacian_var >= threshold), round(laplacian_var, 1)
+    except Exception:
+        return True, 100.0
+
+# Helper: One-Click WhatsApp Referral Generator
+def generate_whatsapp_link(phone, patient_name, case_id, risk_banner, action_directive):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))
+    if len(clean_digits) == 10:
+        clean_digits = "91" + clean_digits
+    msg = (
+        f"🚨 *BREAST TRIAGE ALERT: HIGH-PRIORITY REFERRAL*\n\n"
+        f"• *Patient:* {patient_name}\n"
+        f"• *Case ID:* {case_id}\n"
+        f"• *Triage Status:* {risk_banner}\n"
+        f"• *Required Action:* {action_directive}\n"
+        f"• *Target Safety Window:* 21 Days\n\n"
+        f"Please counsel the patient at home and ensure completion of core biopsy at the District Hospital."
+    )
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
 
 # Helper: Load all patients from DB or fallback
 def fetch_patient_registry():
@@ -74,12 +107,11 @@ def fetch_patient_registry():
                 "yokohama": "Category 2: Benign Cells (Risk of Malignancy: <3%)",
                 "path_notes": "Abundant naked bipolar nuclei with sheets of cohesive benign ductal epithelial cells.",
                 "asha_worker": "Meena Devi",
-                "asha_contact": "+91 9876543210",
+                "asha_contact": "9876543210",
                 "asha_area": "Sub-Center Raipur, Sector 4",
                 "tracker_status": "Referral Pending (Counseling completed at PHC)",
                 "audit_log": [
-                    f"[{datetime.date.today()} 09:30] Registered & Examined by Dr. Rajiv Singh, MBBS",
-                    f"[{datetime.date.today()} 09:45] Stained with Diff-Quik by Lab Tech Sarah Khan"
+                    f"[{datetime.date.today()} 09:30] Registered & Examined by Dr. Rajiv Singh, MBBS"
                 ]
             }
         }
@@ -97,7 +129,7 @@ def save_patient_record(patient_dict):
             st.error(f"Error saving to cloud database: {e}")
     st.session_state.patients[patient_dict["case_id"]] = patient_dict
 
-# Helper: Upload photo to permanent Supabase bucket
+# Helper: Upload photo to Supabase bucket
 def save_slide_image(file_obj, case_id, role, uploader_name):
     timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     if HAS_SUPABASE:
@@ -188,7 +220,27 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
     st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
     st.caption("Register patients, edit demographics, record exams, manage micrographs, and assign ASHA personnel.")
 
-    tab_edit, tab_register = st.tabs(["📝 View / Edit Current Patient", "➕ Register New Patient"])
+    tab_edit, tab_register, tab_abha = st.tabs(["📝 View / Edit Current", "➕ Register New", "🪪 ABHA Auto-Fill"])
+
+    with tab_abha:
+        st.subheader("Fast Demographic Intake via ABHA QR Code Data")
+        abha_raw = st.text_area("Paste Scanned ABHA Card QR Text / JSON String:", placeholder='{"hid": "91-1234-5678-9012", "name": "Kavita Devi", "gender": "F", "dob": "1981-05-12", "pincode": "248001"}')
+        if st.button("Parse ABHA Data"):
+            try:
+                data = json.loads(abha_raw)
+                calc_age = 45
+                if "dob" in data:
+                    birth_year = int(str(data["dob"])[:4])
+                    calc_age = datetime.date.today().year - birth_year
+                patient["name"] = data.get("name", patient["name"])
+                patient["uhid"] = data.get("hid", data.get("healthId", patient["uhid"]))
+                patient["age"] = int(data.get("age", calc_age))
+                patient["pincode"] = str(data.get("pincode", patient["pincode"]))
+                save_patient_record(patient)
+                st.success("Demographics auto-filled from ABHA profile.")
+                st.rerun()
+            except Exception:
+                st.error("Invalid QR format. Ensure standard ABHA JSON text is entered.")
 
     with tab_register:
         with st.form("new_patient_form"):
@@ -201,10 +253,10 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
             new_pincode = c2.text_input("Pincode", "248001")
             new_doc = c3.text_input("Examining MO Name", "Dr. Rajiv Singh, MBBS")
             
-            st.markdown("##### Community Worker Assignment")
+            st.markdown("##### Community Health Worker Assignment")
             a1, a2, a3 = st.columns(3)
             new_asha_name = a1.text_input("ASHA Worker Name", "Meena Devi")
-            new_asha_phone = a2.text_input("ASHA Contact Number", "")
+            new_asha_phone = a2.text_input("ASHA Phone (10 digits)", "")
             new_asha_area = a3.text_input("Assigned Sector / Village", "Sub-Center Sector 1")
             
             submit_new = st.form_submit_button("Register & Activate Record")
@@ -263,9 +315,9 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
             patient["asha_area"] = as3.text_input("ASHA Assigned Area / Village:", patient.get("asha_area", ""))
 
             if st.button("Save Profile & ASHA Details"):
-                patient["audit_log"].append(f"[{datetime.date.today()}] Demographics & ASHA updated by MO")
+                patient["audit_log"].append(f"[{datetime.date.today()}] Profile & ASHA updated by MO")
                 save_patient_record(patient)
-                st.success("Patient & ASHA profile updated successfully.")
+                st.success("Details updated.")
 
         col_left, col_right = st.columns(2)
         with col_left:
@@ -314,21 +366,26 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
             st.success("Clinical exam data saved permanently.")
 
         st.divider()
-        st.markdown("#### Direct Micrograph Upload by Medical Officer")
+        st.markdown("#### Direct Micrograph Upload with Blur Filter")
         mo_new_files = st.file_uploader(
-            "Add Slide Photos as Medical Officer (10x & 40x):",
+            "Add Slide Photos as MO (10x & 40x):",
             type=["jpg", "png", "jpeg"],
             accept_multiple_files=True,
             key="mo_img_uploader"
         )
         if mo_new_files:
             if st.button("Upload Photos to Cloud"):
+                uploaded_count = 0
                 for uploaded in mo_new_files:
+                    is_sharp, sharpness = evaluate_image_quality(uploaded)
+                    if not is_sharp:
+                        st.warning(f"⚠️ `{uploaded.name}` has low sharpness ({sharpness} < 70). Uploading anyway, but recommend refocusing.")
                     img_entry = save_slide_image(uploaded, patient["case_id"], "Medical Officer", patient["referral_doc"])
                     patient["images"].append(img_entry)
-                patient["audit_log"].append(f"[{datetime.date.today()}] {len(mo_new_files)} photo(s) uploaded by MO")
+                    uploaded_count += 1
+                patient["audit_log"].append(f"[{datetime.date.today()}] {uploaded_count} photo(s) uploaded by MO")
                 save_patient_record(patient)
-                st.success(f"Attached {len(mo_new_files)} photo(s).")
+                st.success(f"Attached {uploaded_count} photo(s).")
                 st.rerun()
 
     # Gallery display with deletion in MO Module
@@ -357,7 +414,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
     st.header("2. Laboratory Technician: Slide Staining & Tele-Imaging")
-    st.caption("Select a registered patient, record staining adequacy, append microscope photos, and manage uploads.")
+    st.caption("Select a registered patient, record staining adequacy, append microscope photos, and check blur score.")
 
     st.subheader("Step 1: Link to Registered Patient")
     target_case_id = st.selectbox(
@@ -398,7 +455,7 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
             st.success("Staining details updated.")
 
     with col2:
-        st.markdown("#### Smartphone Micrograph Upload")
+        st.markdown("#### Smartphone Micrograph Upload & Lens Quality Check")
         tech_new_files = st.file_uploader(
             "Attach Slide Photos as Technician:",
             type=["jpg", "png", "jpeg"],
@@ -407,12 +464,17 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
         )
         if tech_new_files:
             if st.button("Upload Tech Photos"):
+                tech_added = 0
                 for uploaded in tech_new_files:
+                    is_sharp, sharpness = evaluate_image_quality(uploaded)
+                    if not is_sharp:
+                        st.warning(f"⚠️ `{uploaded.name}` is blurry (Score: {sharpness}). Recommend wiping lens and refocusing.")
                     img_entry = save_slide_image(uploaded, patient["case_id"], "Lab Technician", patient["prep_tech"])
                     patient["images"].append(img_entry)
-                patient["audit_log"].append(f"[{datetime.date.today()}] {len(tech_new_files)} photo(s) added by Tech ({patient['prep_tech']})")
+                    tech_added += 1
+                patient["audit_log"].append(f"[{datetime.date.today()}] {tech_added} photo(s) added by Tech ({patient['prep_tech']})")
                 save_patient_record(patient)
-                st.success(f"Attached {len(tech_new_files)} photos.")
+                st.success(f"Attached {tech_added} photo(s).")
                 st.rerun()
 
     # Gallery display with deletion in Tech Module
@@ -456,7 +518,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
         * **CBE Palpation:** {patient['cbe_mass']} (Nodes: {patient['cbe_nodes']})
         * **Bedside POCUS:** {'Orientation: ' + patient['pocus_orientation'] + ' | Margins: ' + patient['pocus_margins'] if patient['pocus_available'] else 'Not available on-site'}
         * **Slide Stained By:** {patient['prep_tech']} ({patient['staining']})
-        * **Total Uploaded Micrographs:** {len(patient.get('images', []))}
+        * **Total Micrographs Attached:** {len(patient.get('images', []))}
         """)
 
         st.divider()
@@ -618,6 +680,11 @@ elif role == "4. CDSS Triage & Advisory Report":
         st.warning(f"⚠️ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
     else:
         st.success(f"✅ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+
+    # One-Click WhatsApp Alert
+    if patient.get("asha_contact"):
+        wa_url = generate_whatsapp_link(patient["asha_contact"], patient["name"], patient["case_id"], status_banner, action_text)
+        st.link_button(f"📲 Dispatch Instant WhatsApp Alert to ASHA ({patient.get('asha_worker','')})", wa_url)
 
     st.divider()
     st.subheader("Formal Monochromatic Clinical Advisory Slip")
@@ -805,6 +872,16 @@ elif role == "5. ASHA Closed-Loop Tracker":
             )
             save_patient_record(patient)
             st.success("ASHA contact and area updated.")
+
+        if patient.get("asha_contact"):
+            alert_url = generate_whatsapp_link(
+                patient["asha_contact"],
+                patient["name"],
+                patient["case_id"],
+                patient.get("yokohama", "Under Evaluation"),
+                "Complete district hospital referral visit within 21-day safety window."
+            )
+            st.link_button("📲 Send Follow-Up Reminder via WhatsApp", alert_url)
 
     with col2:
         st.markdown("#### Referral Milestone Status")
