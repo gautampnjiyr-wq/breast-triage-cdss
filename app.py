@@ -710,7 +710,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     st.success(f"Attached {len(valid_files)} photo(s).")
                     st.rerun()
 
-        # Attached Micrographs Gallery (Cleanly inside tab_edit with 8 spaces)
+# Attached Micrographs Gallery (8 spaces)
         if patient.get("images"):
             st.divider()
             st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
@@ -730,15 +730,16 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                         st.success(f"Field #{idx+1} deleted.")
                         st.rerun()
 
-        # Tele-Pathology Dispatch (Cleanly inside tab_edit with 8 spaces)
+        # Tele-Pathology Dispatch (8 spaces)
         st.divider()
         st.markdown("#### 📢 Tele-Pathology Dispatch")
         path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
         patient["pathologist_phone"] = path_ph
         path_alert_url = generate_pathologist_alert_link(path_ph, patient)
         st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
-                                             # ==========================================
-# MODULE 2: LAB TECHNICIAN
+
+# ==========================================
+# MODULE 2: LAB TECHNICIAN (0 spaces)
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
     st.header("2. Laboratory Technician: Slide Staining & Tele-Imaging")
