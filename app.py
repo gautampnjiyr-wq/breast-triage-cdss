@@ -97,7 +97,6 @@ def save_patient_record(patient_dict):
                 payload["date_exam"] = payload["date_exam"].isoformat()
             supabase.table("patients").upsert(payload).execute()
         except Exception as e:
-            # Resilient fallback if custom text columns do not exist in the database table
             err_msg = str(e)
             if any(col in err_msg for col in ["cbe_notes", "tech_notes", "asha_notes", "mo_contact", "pathologist_phone"]):
                 try:
@@ -111,7 +110,7 @@ def save_patient_record(patient_dict):
                 st.error(f"Error saving to cloud database: {e}")
     st.session_state.patients[patient_dict["case_id"]] = patient_dict
 
-# Initial Sync
+# Sync Active Database State
 st.session_state.patients = fetch_patient_registry()
 
 # =========================================================================
@@ -293,8 +292,7 @@ def voice_text_area(label, current_val, key_prefix, height=120):
         res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
         st.session_state[f"val_{key_prefix}"] = res
         return res
-
-# --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
+        # --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
 def evaluate_image_quality(file_obj, threshold=70.0):
     try:
         file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
@@ -340,31 +338,6 @@ def analyze_smear_adequacy(file_obj, min_cluster_area=450):
                 x, y, w, h = cv2.boundingRect(cnt)
                 if area >= mega_sheet_threshold:
                     has_mega_sheet = True
-                    box_color = (0, 255, 255)
-                    label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
-                else:
-                    box_color = (0, 230, 77)
-                    label = f"Cluster #{valid_clusters}"
-
-                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), box_color, 2)
-                cv2.putText(annotated_bgr, label, (x, max(20, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)
-
-        _, buffer = cv2.imencode(".jpg", annotated_bgr)
-        annotated_bytes = buffer.tobytes()
-
-        if has_mega_sheet or valid_clusters >= 4:
-            status = "Adequate Cellularity (Diagnostic Architecture Present)"
-            is_adequate = True
-        elif 1 <= valid_clusters < 4:
-            status = "Suboptimal in this Field (Check other fields)"
-            is_adequate = False
-        else:
-            status = "Acellular Field"
-            is_adequate = False
-
-        return valid_clusters, annotated_bytes, is_adequate, status, has_mega_sheet
-    except Exception as e:
-        return 0, None, False, f"Analysis Error: {e}", False
                     box_color = (0, 255, 255)
                     label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
                 else:
@@ -720,9 +693,8 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                 for uploaded in mo_new_files:
                     is_sharp, sharpness = evaluate_image_quality(uploaded)
                     if not is_sharp:
-                        blurry_files.append((uploaded.name, sharpness))
-                    else:
-              # ==========================================
+                        blurry_files.append((uploaded.name, sha
+                                             # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
@@ -1393,3 +1365,4 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
     st.markdown("#### Chronological Activity Log")
     for log_item in patient.get("audit_log", []):
         st.code(log_item, language="markdown")
+            
