@@ -632,6 +632,154 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                 save_patient_record(patient)
                 st.success("Details updated.")
 
+# ==========================================
+# MODULE 1: MEDICAL OFFICER
+# ==========================================
+if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
+    st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
+    st.caption("All text inputs support hands-free Whisper dictation (tap 🎙️ beside any field).")
+
+    tab_edit, tab_register, tab_abha = st.tabs(["📝 View / Edit Current", "➕ Register New", "🪪 ABHA Auto-Fill"])
+
+    # -------------------------------------------------------------
+    # TAB 1: FAST ABHA QR CODE INTAKE
+    # -------------------------------------------------------------
+    with tab_abha:
+        st.subheader("Fast Intake via ABHA QR Code Data")
+        abha_raw = st.text_area(
+            "Paste Scanned ABHA Card QR Text / JSON String:",
+            placeholder='{"hidn":"21-4560-1406-6251","hid":"21456014066251@abdm","name":"GEETHA","gender":"F","dob":"24-01-2003","mobile":"9843187603","address":"105, WEST STREET, MANAKADAVU POST, Dharapuram, Tiruppur, Tamil Nadu"}'
+        )
+        if st.button("Parse ABHA Data"):
+            try:
+                import re
+                data = json.loads(abha_raw.strip())
+
+                # Robust Date of Birth & Age Calculation (Handles DD-MM-YYYY, YYYY-MM-DD, or YYYY)
+                dob_str = str(data.get("dob", "")).strip()
+                calc_age = patient.get("age", 45)
+
+                if dob_str:
+                    if re.search(r"^\d{1,2}[-/]\d{1,2}[-/]\d{4}$", dob_str):
+                        birth_year = int(dob_str[-4:])
+                        calc_age = datetime.date.today().year - birth_year
+                    elif re.search(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", dob_str):
+                        birth_year = int(dob_str[:4])
+                        calc_age = datetime.date.today().year - birth_year
+                    elif re.search(r"^\d{4}$", dob_str):
+                        birth_year = int(dob_str)
+                        calc_age = datetime.date.today().year - birth_year
+
+                # Extract Identifiers & Address Details
+                extracted_uhid = data.get("hidn") or data.get("hid") or data.get("healthId") or patient.get("uhid", "")
+                
+                extracted_pin = data.get("pincode")
+                if not extracted_pin and "address" in data:
+                    pin_match = re.search(r"\b\d{6}\b", str(data["address"]))
+                    if pin_match:
+                        extracted_pin = pin_match.group(0)
+
+                # Commit to Patient Record
+                patient["name"] = data.get("name", patient["name"])
+                patient["uhid"] = str(extracted_uhid)
+                patient["age"] = int(data.get("age", calc_age))
+                if extracted_pin:
+                    patient["pincode"] = str(extracted_pin)
+                if "mobile" in data:
+                    patient["patient_contact"] = str(data["mobile"])
+
+                patient["audit_log"].append(f"[{datetime.date.today()}] Profile auto-populated from official ABHA QR code ({patient['uhid']})")
+                save_patient_record(patient)
+                st.success(f"✅ ABHA Verified: {patient['name']} ({patient['age']} yrs) | ABHA ID: {patient['uhid']}")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Failed to parse ABHA data: {e}. Please ensure valid JSON was pasted.")
+
+    # -------------------------------------------------------------
+    # TAB 2: REGISTER NEW PATIENT
+    # -------------------------------------------------------------
+    with tab_register:
+        with st.form("new_patient_form"):
+            st.subheader("New Patient Intake")
+            c1, c2, c3 = st.columns(3)
+            new_name = c1.text_input("Full Name")
+            new_age = c2.number_input("Age (Years)", 15, 100, 45)
+            new_uhid = c3.text_input("UHID / National Health ID")
+            new_case_id = c1.text_input("Case ID (Unique)", f"PB-2026-{len(st.session_state.patients)+1001}")
+            new_pincode = c2.text_input("Pincode", "248001")
+            new_doc = c3.text_input("Examining MO Name", "Dr. Rajiv Singh, MBBS")
+            
+            st.markdown("##### Community Health Worker Assignment")
+            a1, a2, a3 = st.columns(3)
+            new_asha_name = a1.text_input("ASHA Worker Name", "Meena Devi")
+            new_asha_phone = a2.text_input("ASHA Phone (10 digits)", "")
+            new_asha_area = a3.text_input("Assigned Sector / Village", "Sub-Center Sector 1")
+            
+            submit_new = st.form_submit_button("Register & Activate Record")
+
+            if submit_new and new_case_id:
+                new_patient = {
+                    "name": new_name or "New Patient",
+                    "age": int(new_age),
+                    "uhid": new_uhid or "PENDING",
+                    "case_id": new_case_id,
+                    "date_exam": datetime.date.today(),
+                    "pincode": new_pincode,
+                    "referral_doc": new_doc,
+                    "patient_contact": "",
+                    "cbe_mass": "Firm, Discrete, Moderately mobile",
+                    "cbe_size": "2.5 cm",
+                    "cbe_nodes": "Absent (Clinically negative)",
+                    "cbe_notes": "",
+                    "pocus_available": False,
+                    "pocus_orientation": "Wider-than-tall (Horizontal / Parallel to skin)",
+                    "pocus_margins": "Smooth & Well-defined",
+                    "pocus_posterior": "Posterior acoustic enhancement (or neutral)",
+                    "fnac_passes": "2 passes (23G Needle, Capillary method)",
+                    "prep_tech": "Unassigned",
+                    "staining": "Diff-Quik (90-second rapid Romanowsky)",
+                    "macro_adequate": "Pending Assessment",
+                    "images": [],
+                    "review_mode": "Awaiting Review",
+                    "pathologist": "Pending Review",
+                    "yokohama": "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
+                    "path_notes": "Awaiting slide image review.",
+                    "asha_worker": new_asha_name,
+                    "asha_contact": new_asha_phone,
+                    "asha_area": new_asha_area,
+                    "tracker_status": "Referral Pending (Counseling completed at PHC)",
+                    "audit_log": [f"[{datetime.date.today()}] Record created by {new_doc}"]
+                }
+                save_patient_record(new_patient)
+                st.session_state.active_case_id = new_case_id
+                st.success(f"Case {new_case_id} registered successfully.")
+                st.rerun()
+
+    # -------------------------------------------------------------
+    # TAB 3: VIEW / EDIT ACTIVE PATIENT & EXAM DETAILS
+    # -------------------------------------------------------------
+    with tab_edit:
+        st.subheader(f"Demographic & Clinical Profile: {patient['name']} ({patient['case_id']})")
+        
+        with st.expander("✏️ Edit Demographics & ASHA Assignment (Voice-Enabled)", expanded=False):
+            ed1, ed2, ed3 = st.columns(3)
+            patient["name"] = voice_text_input("Patient Full Name:", patient.get("name", ""), "mo_pname")
+            patient["age"] = ed2.number_input("Age:", 15, 100, int(patient.get("age", 45)))
+            patient["uhid"] = voice_text_input("UHID:", patient.get("uhid", ""), "mo_puhid")
+            patient["pincode"] = voice_text_input("Pincode:", patient.get("pincode", ""), "mo_ppincode")
+            patient["referral_doc"] = voice_text_input("Examining MO:", patient.get("referral_doc", ""), "mo_pdoc")
+
+            st.markdown("##### Assigned ASHA / Community Health Worker")
+            patient["asha_worker"] = voice_text_input("ASHA Worker Name:", patient.get("asha_worker", ""), "mo_ashaname")
+            patient["asha_contact"] = voice_text_input("ASHA Phone Number:", patient.get("asha_contact", ""), "mo_ashaphone")
+            patient["asha_area"] = voice_text_input("ASHA Assigned Area / Village:", patient.get("asha_area", ""), "mo_ashaarea")
+
+            if st.button("Save Profile & ASHA Details"):
+                patient["audit_log"].append(f"[{datetime.date.today()}] Profile updated by MO")
+                save_patient_record(patient)
+                st.success("Details updated.")
+
         col_left, col_right = st.columns(2)
         with col_left:
             st.markdown("#### Standardized Clinical Palpation (CBE)")
@@ -710,7 +858,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     st.success(f"Attached {len(valid_files)} photo(s).")
                     st.rerun()
 
-# Attached Micrographs Gallery (8 spaces)
+        # Attached Micrographs Gallery (Scoped inside Tab 3)
         if patient.get("images"):
             st.divider()
             st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
@@ -730,14 +878,13 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                         st.success(f"Field #{idx+1} deleted.")
                         st.rerun()
 
-        # Tele-Pathology Dispatch (8 spaces)
+        # Tele-Pathology Dispatch (Scoped inside Tab 3)
         st.divider()
         st.markdown("#### 📢 Tele-Pathology Dispatch")
         path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
         patient["pathologist_phone"] = path_ph
         path_alert_url = generate_pathologist_alert_link(path_ph, patient)
         st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
-
 # ==========================================
 # MODULE 2: LAB TECHNICIAN (0 spaces)
 # ==========================================
