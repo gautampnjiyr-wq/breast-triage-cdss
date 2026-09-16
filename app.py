@@ -95,20 +95,15 @@ def save_patient_record(patient_dict):
             payload = patient_dict.copy()
             if isinstance(payload.get("date_exam"), (datetime.date, datetime.datetime)):
                 payload["date_exam"] = payload["date_exam"].isoformat()
-            
-            # Safe upsert
             supabase.table("patients").upsert(payload).execute()
         except Exception as e:
-            # Fallback if specific optional text columns are missing in DB schema
+            # Resilient fallback if custom text columns do not exist in the database table
             err_msg = str(e)
-            if "cbe_notes" in err_msg or "tech_notes" in err_msg or "asha_notes" in err_msg:
+            if any(col in err_msg for col in ["cbe_notes", "tech_notes", "asha_notes", "mo_contact", "pathologist_phone"]):
                 try:
                     safe_payload = payload.copy()
-                    safe_payload.pop("cbe_notes", None)
-                    safe_payload.pop("tech_notes", None)
-                    safe_payload.pop("asha_notes", None)
-                    safe_payload.pop("mo_contact", None)
-                    safe_payload.pop("pathologist_phone", None)
+                    for col in ["cbe_notes", "tech_notes", "asha_notes", "mo_contact", "pathologist_phone"]:
+                        safe_payload.pop(col, None)
                     supabase.table("patients").upsert(safe_payload).execute()
                 except Exception:
                     st.error(f"Error saving to cloud database: {e}")
@@ -124,7 +119,6 @@ st.session_state.patients = fetch_patient_registry()
 # =========================================================================
 params = st.query_params
 if params.get("view") == "report":
-    # Hide sidebar and default Streamlit header/footer
     st.markdown("""
         <style>
             [data-testid="stSidebar"] { display: none !important; }
@@ -215,7 +209,7 @@ if params.get("view") == "report":
         </div>
         <div class="advisory-box">
             <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE & CONFIRMATORY ADVISORY</div>
-            <p style="margin: 6px 0 3px 0;"><strong>Findings:</strong> Category evaluated under triple assessment concordance rules.</p>
+            <p style="margin: 6px 0 3px 0;"><strong>Findings:</strong> Evaluated under triple assessment concordance protocol.</p>
         </div>
         <div class="footer-signatures">
             <div style="flex: 1.2; min-width: 180px;">
@@ -239,7 +233,7 @@ if params.get("view") == "report":
     </html>
     """
     components.html(standalone_html, height=850, scrolling=True)
-    st.stop()  # Halt execution so patient does not see the clinician application
+    st.stop()
 
 # Helper: Whisper Voice-to-Text Dictation
 def transcribe_voice_whisper(audio_bytes):
@@ -299,8 +293,7 @@ def voice_text_area(label, current_val, key_prefix, height=120):
         res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
         st.session_state[f"val_{key_prefix}"] = res
         return res
-
-def evaluate_image_quality(file_obj, threshold=70.0):
+        def evaluate_image_quality(file_obj, threshold=70.0):
     try:
         file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
         file_obj.seek(0)
@@ -401,8 +394,136 @@ def generate_pathologist_alert_link(phone, patient):
     )
     return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
 
-def generate_mo_signoff_alert_link(phone, patien
-                                   # ==========================================
+def generate_mo_signoff_alert_link(phone, patient):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))
+    if len(clean_digits) == 10:
+        clean_digits = "91" + clean_digits
+    msg = (
+        f"✅ *CYTOLOGY REPORT SIGNED OFF & FINALIZED*\n\n"
+        f"• *Patient:* {patient['name']} (Case ID: `{patient['case_id']}`)\n"
+        f"• *Evaluating Pathologist:* {patient.get('pathologist', '')}\n"
+        f"• *IAC Yokohama Category:* {patient.get('yokohama', '')}\n"
+        f"• *Notes:* {patient.get('path_notes', 'N/A')}\n\n"
+        f"Proceed to Module 4 to view CDSS Concordance Triage and print advisory report."
+    )
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
+
+def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_url):
+    clean_digits = "".join(filter(str.isdigit, str(target_phone)))
+    if len(clean_digits) == 10:
+        clean_digits = "91" + clean_digits
+
+    case_id = patient.get("case_id", "")
+    p_name = patient.get("name", "")
+    yokohama = patient.get("yokohama", "Under Evaluation")
+
+    if recipient_type == "Patient / Family":
+        msg = (
+            f"नमस्ते {p_name} जी,\n\n"
+            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है।\n"
+            f"• *केस आईडी:* `{case_id}`\n"
+            f"• *जांच केंद्र:* {patient.get('referral_doc', 'Primary Health Centre')}\n\n"
+            f"📄 *अपनी आधिकारिक रिपोर्ट देखने के लिए यहाँ क्लिक करें:* {report_url}\n\n"
+            f"कृपया यह पर्ची अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं।"
+        )
+    elif recipient_type == "Consulting Pathologist":
+        msg = (
+            f"🔬 *FINALIZED CYTOLOGY & TRIAGE ADVISORY ARCHIVE*\n\n"
+            f"• *Patient:* {p_name} ({patient.get('age', '')}y, F)\n"
+            f"• *Case ID:* `{case_id}` | *UHID:* `{patient.get('uhid', '')}`\n"
+            f"• *Yokohama Category:* {yokohama}\n"
+            f"• *Signed By:* {patient.get('pathologist', 'Pathologist')}\n\n"
+            f"📥 *Digital Slip Link:* {report_url}"
+        )
+    elif recipient_type == "Examining Medical Officer (MO)":
+        msg = (
+            f"🩺 *BEDSIDE TRIAGE ADVISORY & CONCORDANCE SUMMARY*\n\n"
+            f"• *Patient:* {p_name} | *Case ID:* `{case_id}`\n"
+            f"• *Examining MO:* {patient.get('referral_doc', '')}\n"
+            f"• *IAC Yokohama Result:* {yokohama}\n"
+            f"• *Action Directive:* Core Biopsy referral status enclosed in advisory.\n\n"
+            f"📄 *View/Print Signed PDF Slip:* {report_url}"
+        )
+    else:
+        msg = (
+            f"📋 *BREAST HEALTH TRIAGE RECORD*\n\n"
+            f"• *Patient:* {p_name} (Case ID: `{case_id}`)\n"
+            f"• *Status:* {yokohama}\n"
+            f"• *Assigned ASHA:* {patient.get('asha_worker', 'N/A')}\n\n"
+            f"📄 *Digital Report Link:* {report_url}"
+        )
+
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
+
+def save_slide_image(file_obj, case_id, role, uploader_name):
+    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    if HAS_SUPABASE:
+        try:
+            filename = f"{case_id}_{uuid.uuid4().hex[:6]}.jpg"
+            file_bytes = file_obj.getvalue()
+            supabase.storage.from_("slide-micrographs").upload(
+                path=filename,
+                file=file_bytes,
+                file_options={"content-type": file_obj.type or "image/jpeg"}
+            )
+            image_url = supabase.storage.from_("slide-micrographs").get_public_url(filename)
+            return {"url": image_url, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
+        except Exception as e:
+            st.error(f"Cloud image upload error: {e}")
+    return {"file": file_obj, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
+
+def delete_slide_image(image_item):
+    if HAS_SUPABASE and "url" in image_item:
+        try:
+            filename = image_item["url"].split("/")[-1]
+            supabase.storage.from_("slide-micrographs").remove([filename])
+        except Exception as e:
+            st.error(f"Cloud storage deletion error: {e}")
+
+# Sidebar Selection
+if "active_case_id" not in st.session_state or st.session_state.active_case_id not in st.session_state.patients:
+    st.session_state.active_case_id = list(st.session_state.patients.keys())[0]
+
+st.sidebar.title("🩺 Breast Triage CDSS")
+st.sidebar.caption("Point-of-Care Triple Assessment + Whisper AI")
+
+if HAS_SUPABASE:
+    st.sidebar.success("🟢 Cloud Sync: Active (Supabase)")
+else:
+    st.sidebar.warning("🟡 Storage: RAM Session")
+
+case_options = list(st.session_state.patients.keys())
+selected_case = st.sidebar.selectbox(
+    "Active Patient Case:",
+    options=case_options,
+    index=case_options.index(st.session_state.active_case_id) if st.session_state.active_case_id in case_options else 0
+)
+st.session_state.active_case_id = selected_case
+patient = st.session_state.patients[st.session_state.active_case_id]
+
+if patient.get("review_mode") == "Final Pathologist Sign-Off":
+    st.sidebar.success("● Pathologist Reviewed")
+elif patient.get("review_mode") == "AI Provisional":
+    st.sidebar.warning("⚡ AI Provisional Triage")
+else:
+    st.sidebar.info("⏳ Awaiting Cytology Review")
+
+st.sidebar.markdown(f"**Patient:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")
+st.sidebar.divider()
+
+role = st.sidebar.radio(
+    "Workflow Cadre View:",
+    [
+        "1. Medical Officer (Exam, POCUS & Direct Upload)",
+        "2. Lab Technician (Staining, Patient Link & Upload)",
+        "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
+        "4. CDSS Triage & Advisory Report",
+        "5. ASHA Closed-Loop Tracker",
+        "6. Audit Trail & Provenance (Who Did What)"
+    ]
+)
+
+# ==========================================
 # MODULE 1: MEDICAL OFFICER
 # ==========================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
@@ -574,48 +695,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     if not is_sharp:
                         blurry_files.append((uploaded.name, sharpness))
                     else:
-                        valid_files.append(uploaded)
-
-                if blurry_files:
-                    for fname, score in blurry_files:
-                        st.error(f"🚫 **Upload Blocked for `{fname}`** (Sharpness Score: `{score}` < `70.0`). Refocus microscope lens.")
-                else:
-                    for uploaded in valid_files:
-                        img_entry = save_slide_image(uploaded, patient["case_id"], "Medical Officer", patient["referral_doc"])
-                        patient["images"].append(img_entry)
-                    patient["audit_log"].append(f"[{datetime.date.today()}] {len(valid_files)} photo(s) uploaded by MO")
-                    save_patient_record(patient)
-                    st.toast("✅ Micrographs uploaded successfully!", icon="🩺")
-                    st.success(f"Attached {len(valid_files)} photo(s).")
-                    st.rerun()
-
-        # GALLERY & DISPATCH SCOPED INSIDE TAB_EDIT (Fixed: Does NOT leak to Register New tab)
-        if patient.get("images"):
-            st.divider()
-            st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
-            img_cols = st.columns(min(len(patient["images"]), 4))
-            for idx, item in enumerate(patient["images"]):
-                with img_cols[idx % 4]:
-                    if "url" in item:
-                        st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
-                    elif "file" in item:
-                        st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
-                    
-                    if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
-                        delete_slide_image(item)
-                        patient["images"].pop(idx)
-                        patient["audit_log"].append(f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})")
-                        save_patient_record(patient)
-                        st.success(f"Field #{idx+1} deleted.")
-                        st.rerun()
-
-        st.divider()
-        st.markdown("#### 📢 Tele-Pathology Dispatch")
-        path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
-        patient["pathologist_phone"] = path_ph
-        path_alert_url = generate_pathologist_alert_link(path_ph, patient)
-        st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
-        # ==========================================
+              # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
@@ -1004,7 +1084,6 @@ elif role == "4. CDSS Triage & Advisory Report":
         placeholder="Enter 10-digit mobile number"
     )
 
-    # Standalone patient report link: contains ?view=report to lock out the clinician app
     app_base_url = "https://breast-triage-cdss.streamlit.app"
     standalone_report_link = f"{app_base_url}/?view=report&case_id={patient['case_id']}"
 
