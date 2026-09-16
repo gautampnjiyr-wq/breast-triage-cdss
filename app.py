@@ -1,4 +1,4 @@
-import datetime
+import datetimeimport datetime
 import uuid
 import urllib.parse
 import json
@@ -292,7 +292,13 @@ def voice_text_area(label, current_val, key_prefix, height=120):
         res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
         st.session_state[f"val_{key_prefix}"] = res
         return res
+```[cite: 1, 2]
 
+---
+
+**Part 2 of 2: Quality Inspection, Adequacy Masking, WhatsApp Alerts, and Sidebar Navigation**
+
+```python
 # --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
 def evaluate_image_quality(file_obj, threshold=70.0):
     try:
@@ -402,6 +408,358 @@ def generate_mo_signoff_alert_link(phone, patient):
     msg = (
         f"✅ *CYTOLOGY REPORT SIGNED OFF & FINALIZED*\n\n"
         f"• *Patient:* {patient['name']} (Case ID: `{patient['case_id']}`)\n"
+        f"• *Evaluating Pathologist:* {patient.get('pathologist', '')}\n"
+        f"• *IAC Yokohama Category:* {patient.get('yokohama', '')}\n"
+        f"• *Notes:* {patient.get('path_notes', 'N/A')}\n\n"
+        f"Proceed to Module 4 to view CDSS Concordance Triage and print advisory report."
+    )
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
+
+def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_url):
+    clean_digits = "".join(filter(str.isdigit, str(target_phone)))
+    if len(clean_digits) == 10:
+        clean_digits = "91" + clean_digits
+
+    case_id = patient.get("case_id", "")
+    p_name = patient.get("name", "")
+    yokohama = patient.get("yokohama", "Under Evaluation")
+
+    if recipient_type == "Patient / Family":
+        msg = (
+            f"नमस्ते {p_name} जी,\n\n"
+            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है।\n"
+            f"• *केस आईडी:* `{case_id}`\n"
+            f"• *जांच केंद्र:* {patient.get('referral_doc', 'Primary Health Centre')}\n\n"
+            f"📄 *अपनी आधिकारिक रिपोर्ट देखने के लिए यहाँ क्लिक करें:* {report_url}\n\n"
+            f"कृपया यह पर्ची अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं।"
+        )
+    elif recipient_type == "Consulting Pathologist":
+        msg = (
+            f"🔬 *FINALIZED CYTOLOGY & TRIAGE ADVISORY ARCHIVE*\n\n"
+            f"• *Patient:* {p_name} ({patient.get('age', '')}y, F)\n"
+            f"• *Case ID:* `{case_id}` | *UHID:* `{patient.get('uhid', '')}`\n"
+            f"• *Yokohama Category:* {yokohama}\n"
+            f"• *Signed By:* {patient.get('pathologist', 'Pathologist')}\n\n"
+            f"📥 *Digital Slip Link:* {report_url}"
+        )
+    elif recipient_type == "Examining Medical Officer (MO)":
+        msg = (
+            f"🩺 *BEDSIDE TRIAGE ADVISORY & CONCORDANCE SUMMARY*\n\n"
+            f"• *Patient:* {p_name} | *Case ID:* `{case_id}`\n"
+            f"• *Examining MO:* {patient.get('referral_doc', '')}\n"
+            f"• *IAC Yokohama Result:* {yokohama}\n"
+            f"• *Action Directive:* Core Biopsy referral status enclosed in advisory.\n\n"
+            f"📄 *View/Print Signed PDF Slip:* {report_url}"
+        )
+    else:
+        msg = (
+            f"📋 *BREAST HEALTH TRIAGE RECORD*\n\n"
+            f"• *Patient:* {p_name} (Case ID: `{case_id}`)\n"
+            f"• *Status:* {yokohama}\n"
+            f"• *Assigned ASHA:* {patient.get('asha_worker', 'N/A')}\n\n"
+            f"📄 *Digital Report Link:* {report_url}"
+        )
+
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
+
+def save_slide_image(file_obj, case_id, role, uploader_name):
+    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    if HAS_SUPABASE:
+        try:
+            filename = f"{case_id}_{uuid.uuid4().hex[:6]}.jpg"
+            file_bytes = file_obj.getvalue()
+            supabase.storage.from_("slide-micrographs").upload(
+                path=filename,
+                file=file_bytes,
+                file_options={"content-type": file_obj.type or "image/jpeg"}
+            )
+            image_url = supabase.storage.from_("slide-micrographs").get_public_url(filename)
+            return {"url": image_url, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
+        except Exception as e:
+            st.error(f"Cloud image upload error: {e}")
+    return {"file": file_obj, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
+
+def delete_slide_image(image_item):
+    if HAS_SUPABASE and "url" in image_item:
+        try:
+            filename = image_item["url"].split("/")[-1]
+            supabase.storage.from_("slide-micrographs").remove([filename])
+        except Exception as e:
+            st.error(f"Cloud storage deletion error: {e}")
+
+# Sidebar Selection
+if "active_case_id" not in st.session_state or st.session_state.active_case_id not in st.session_state.patients:
+    st.session_state.active_case_id = list(st.session_state.patients.keys())[0]
+
+st.sidebar.title("🩺 Breast Triage CDSS")
+st.sidebar.caption("Point-of-Care Triple Assessment + Whisper AI")
+
+if HAS_SUPABASE:
+    st.sidebar.success("🟢 Cloud Sync: Active (Supabase)")
+else:
+    st.sidebar.warning("🟡 Storage: RAM Session")
+
+case_options = list(st.session_state.patients.keys())
+selected_case = st.sidebar.selectbox(
+    "Active Patient Case:",
+    options=case_options,
+    index=case_options.index(st.session_state.active_case_id) if st.session_state.active_case_id in case_options else 0
+)
+st.session_state.active_case_id = selected_case
+patient = st.session_state.patients[st.session_state.active_case_id]
+
+if patient.get("review_mode") == "Final Pathologist Sign-Off":
+    st.sidebar.success("● Pathologist Reviewed")
+elif patient.get("review_mode") == "AI Provisional":
+    st.sidebar.warning("⚡ AI Provisional Triage")
+else:
+    st.sidebar.info("⏳ Awaiting Cytology Review")
+
+st.sidebar.markdown(f"**Patient:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")
+st.sidebar.divider()
+
+role = st.sidebar.radio(
+    "Workflow Cadre View:",
+    [
+        "1. Medical Officer (Exam, POCUS & Direct Upload)",
+        "2. Lab Technician (Staining, Patient Link & Upload)",
+        "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
+        "4. CDSS Triage & Advisory Report",
+        "5. ASHA Closed-Loop Tracker",
+        "6. Audit Trail & Provenance (Who Did What)"
+    ]
+)
+```[cite: 1, 2]
+# --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
+def evaluate_image_quality(file_obj, threshold=70.0):
+    try:
+        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)[cite: 1, 2]
+        file_obj.seek(0)[cite: 1, 2]
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)[cite: 1, 2]
+        if img is None:[cite: 1, 2]
+            return True, 100.0[cite: 1, 2]
+        laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()[cite: 1, 2]
+        return (laplacian_var >= threshold), round(laplacian_var, 1)[cite: 1, 2]
+    except Exception:[cite: 1, 2]
+        return True, 100.0[cite: 1, 2]
+
+def analyze_smear_adequacy(file_obj, min_cluster_area=450):
+    try:
+        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)[cite: 1, 2]
+        file_obj.seek(0)[cite: 1, 2]
+        bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)[cite: 1, 2]
+        if bgr is None:[cite: 1, 2]
+            return 0, None, False, "Corrupted Image", False[cite: 1, 2]
+
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[cite: 1, 2]
+        lower_purple = np.array([115, 35, 30])[cite: 1, 2]
+        upper_purple = np.array([165, 255, 215])[cite: 1, 2]
+        nuclei_mask = cv2.inRange(hsv, lower_purple, upper_purple)[cite: 1, 2]
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))[cite: 1, 2]
+        cluster_mask = cv2.morphologyEx(nuclei_mask, cv2.MORPH_CLOSE, kernel)[cite: 1, 2]
+        clean_mask = cv2.morphologyEx(cluster_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))[cite: 1, 2]
+
+        contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[cite: 1, 2]
+
+        annotated_bgr = bgr.copy()[cite: 1, 2]
+        valid_clusters = 0[cite: 1, 2]
+        has_mega_sheet = False[cite: 1, 2]
+        total_pixels = bgr.shape[0] * bgr.shape[1][cite: 1, 2]
+        min_cluster_size = max(min_cluster_area, int(total_pixels * 0.0006))[cite: 1, 2]
+        mega_sheet_threshold = int(total_pixels * 0.035)[cite: 1, 2]
+
+        for cnt in contours:[cite: 1, 2]
+            area = cv2.contourArea(cnt)[cite: 1, 2]
+            if area >= min_cluster_size:[cite: 1, 2]
+                valid_clusters += 1[cite: 1, 2]
+                x, y, w, h = cv2.boundingRect(cnt)[cite: 1, 2]
+                if area >= mega_sheet_threshold:[cite: 1, 2]
+                    has_mega_sheet = True[cite: 1, 2]
+                    box_color = (0, 255, 255)[cite: 1, 2]
+                    label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"[cite: 1, 2]
+                else:
+                    box_color = (0, 230, 77)[cite: 1, 2]
+                    label = f"Cluster #{valid_clusters}"[cite: 1, 2]
+
+                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), box_color, 2)[cite: 1, 2]
+                cv2.putText(annotated_bgr, label, (x, max(20, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)[cite: 1, 2]
+
+        _, buffer = cv2.imencode(".jpg", annotated_bgr)[cite: 1, 2]
+        annotated_bytes = buffer.tobytes()[cite: 1, 2]
+
+        if has_mega_sheet or valid_clusters >= 4:[cite: 1, 2]
+            status = "Adequate Cellularity (Diagnostic Architecture Present)"[cite: 1, 2]
+            is_adequate = True[cite: 1, 2]
+        elif 1 <= valid_clusters < 4:[cite: 1, 2]
+            status = "Suboptimal in this Field (Check other fields)"[cite: 1, 2]
+            is_adequate = False[cite: 1, 2]
+        else:
+            status = "Acellular Field"[cite: 1, 2]
+            is_adequate = False[cite: 1, 2]
+
+        return valid_clusters, annotated_bytes, is_adequate, status, has_mega_sheet[cite: 1, 2]
+    except Exception as e:[cite: 1, 2]
+        return 0, None, False, f"Analysis Error: {e}", False[cite: 1, 2]
+
+def generate_whatsapp_link(phone, patient_name, case_id, risk_banner, action_directive):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))[cite: 1, 2]
+    if len(clean_digits) == 10:[cite: 1, 2]
+        clean_digits = "91" + clean_digits[cite: 1, 2]
+    msg = (
+        f"🚨 *BREAST TRIAGE ALERT: HIGH-PRIORITY REFERRAL*\n\n"
+        f"• *Patient:* {patient_name}\n"
+        f"• *Case ID:* {case_id}\n"
+        f"• *Triage Status:* {risk_banner}\n"
+        f"• *Required Action:* {action_directive}\n"
+        f"• *Target Safety Window:* 21 Days\n\n"
+        f"Please counsel patient at home and ensure core biopsy completion at District Hospital."
+    )[cite: 1, 2]
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"[cite: 1, 2]
+
+def generate_pathologist_alert_link(phone, patient):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))[cite: 1, 2]
+    if len(clean_digits) == 10:[cite: 1, 2]
+        clean_digits = "91" + clean_digits[cite: 1, 2]
+    msg = (
+        f"🔬 *NEW CYTOLOGY TELE-REVIEW REQUEST*\n\n"
+        f"• *Patient:* {patient['name']} ({patient['age']}y)\n"
+        f"• *Case ID:* `{patient['case_id']}` | *UHID:* `{patient['uhid']}`\n"
+        f"• *Examining MO:* {patient['referral_doc']}\n"
+        f"• *Palpation:* {patient['cbe_mass']}\n"
+        f"• *Micrographs:* {len(patient.get('images', []))} attached\n"
+        f"Please review slide images and submit tele-cytology sign-off."
+    )[cite: 1, 2]
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"[cite: 1, 2]
+
+def generate_mo_signoff_alert_link(phone, patient):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))[cite: 1, 2]
+    if len(clean_digits) == 10:[cite: 1, 2]
+        clean_digits = "91" + clean_digits[cite: 1, 2]
+    msg = (
+        f"✅ *CYTOLOGY REPORT SIGNED OFF & FINALIZED*\n\n"
+        f"• *Patient:* {patient['name']} (Case ID: `{patient['case_id']}`)\n"
+        f"• *Evaluating Pathologist:* {patient.get('pathologist', '')}\n"
+        f"• *IAC Yokohama Category:* {patient.get('yokohama', '')}\n"
+        f"• *Notes:* {patient.get('path_notes', 'N/A')}\n\n"
+        f"Proceed to Module 4 to view CDSS Concordance Triage and print advisory report."
+    )[cite: 1, 2]
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"[cite: 1, 2]
+
+def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_url):
+    clean_digits = "".join(filter(str.isdigit, str(target_phone)))[cite: 1, 2]
+    if len(clean_digits) == 10:[cite: 1, 2]
+        clean_digits = "91" + clean_digits[cite: 1, 2]
+
+    case_id = patient.get("case_id", "")[cite: 1, 2]
+    p_name = patient.get("name", "")[cite: 1, 2]
+    yokohama = patient.get("yokohama", "Under Evaluation")[cite: 1, 2]
+
+    if recipient_type == "Patient / Family":[cite: 1, 2]
+        msg = (
+            f"नमस्ते {p_name} जी,\n\n"
+            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है।\n"
+            f"• *केस आईडी:* `{case_id}`\n"
+            f"• *जांच केंद्र:* {patient.get('referral_doc', 'Primary Health Centre')}\n\n"
+            f"📄 *अपनी आधिकारिक रिपोर्ट देखने के लिए यहाँ क्लिक करें:* {report_url}\n\n"
+            f"कृपया यह पर्ची अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं।"
+        )[cite: 1, 2]
+    elif recipient_type == "Consulting Pathologist":[cite: 1, 2]
+        msg = (
+            f"🔬 *FINALIZED CYTOLOGY & TRIAGE ADVISORY ARCHIVE*\n\n"
+            f"• *Patient:* {p_name} ({patient.get('age', '')}y, F)\n"
+            f"• *Case ID:* `{case_id}` | *UHID:* `{patient.get('uhid', '')}`\n"
+            f"• *Yokohama Category:* {yokohama}\n"
+            f"• *Signed By:* {patient.get('pathologist', 'Pathologist')}\n\n"
+            f"📥 *Digital Slip Link:* {report_url}"
+        )[cite: 1, 2]
+    elif recipient_type == "Examining Medical Officer (MO)":[cite: 1, 2]
+        msg = (
+            f"🩺 *BEDSIDE TRIAGE ADVISORY & CONCORDANCE SUMMARY*\n\n"
+            f"• *Patient:* {p_name} | *Case ID:* `{case_id}`\n"
+            f"• *Examining MO:* {patient.get('referral_doc', '')}\n"
+            f"• *IAC Yokohama Result:* {yokohama}\n"
+            f"• *Action Directive:* Core Biopsy referral status enclosed in advisory.\n\n"
+            f"📄 *View/Print Signed PDF Slip:* {report_url}"
+        )[cite: 1, 2]
+    else:
+        msg = (
+            f"📋 *BREAST HEALTH TRIAGE RECORD*\n\n"
+            f"• *Patient:* {p_name} (Case ID: `{case_id}`)\n"
+            f"• *Status:* {yokohama}\n"
+            f"• *Assigned ASHA:* {patient.get('asha_worker', 'N/A')}\n\n"
+            f"📄 *Digital Report Link:* {report_url}"
+        )[cite: 1, 2]
+
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"[cite: 1, 2]
+
+def save_slide_image(file_obj, case_id, role, uploader_name):
+    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")[cite: 1, 2]
+    if HAS_SUPABASE:[cite: 1, 2]
+        try:
+            filename = f"{case_id}_{uuid.uuid4().hex[:6]}.jpg"[cite: 1, 2]
+            file_bytes = file_obj.getvalue()[cite: 1, 2]
+            supabase.storage.from_("slide-micrographs").upload(
+                path=filename,
+                file=file_bytes,
+                file_options={"content-type": file_obj.type or "image/jpeg"}
+            )[cite: 1, 2]
+            image_url = supabase.storage.from_("slide-micrographs").get_public_url(filename)[cite: 1, 2]
+            return {"url": image_url, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}[cite: 1, 2]
+        except Exception as e:[cite: 1, 2]
+            st.error(f"Cloud image upload error: {e}")[cite: 1, 2]
+    return {"file": file_obj, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}[cite: 1, 2]
+
+def delete_slide_image(image_item):
+    if HAS_SUPABASE and "url" in image_item:[cite: 1, 2]
+        try:
+            filename = image_item["url"].split("/")[-1][cite: 1, 2]
+            supabase.storage.from_("slide-micrographs").remove([filename])[cite: 1, 2]
+        except Exception as e:[cite: 1, 2]
+            st.error(f"Cloud storage deletion error: {e}")[cite: 1, 2]
+
+# Sidebar Selection
+if "active_case_id" not in st.session_state or st.session_state.active_case_id not in st.session_state.patients:[cite: 1, 2]
+    st.session_state.active_case_id = list(st.session_state.patients.keys())[0][cite: 1, 2]
+
+st.sidebar.title("🩺 Breast Triage CDSS")[cite: 1, 2]
+st.sidebar.caption("Point-of-Care Triple Assessment + Whisper AI")[cite: 1, 2]
+
+if HAS_SUPABASE:[cite: 1, 2]
+    st.sidebar.success("🟢 Cloud Sync: Active (Supabase)")[cite: 1, 2]
+else:
+    st.sidebar.warning("🟡 Storage: RAM Session")[cite: 1, 2]
+
+case_options = list(st.session_state.patients.keys())[cite: 1, 2]
+selected_case = st.sidebar.selectbox(
+    "Active Patient Case:",
+    options=case_options,
+    index=case_options.index(st.session_state.active_case_id) if st.session_state.active_case_id in case_options else 0
+)[cite: 1, 2]
+st.session_state.active_case_id = selected_case[cite: 1, 2]
+patient = st.session_state.patients[st.session_state.active_case_id][cite: 1, 2]
+
+if patient.get("review_mode") == "Final Pathologist Sign-Off":[cite: 1, 2]
+    st.sidebar.success("● Pathologist Reviewed")[cite: 1, 2]
+elif patient.get("review_mode") == "AI Provisional":[cite: 1, 2]
+    st.sidebar.warning("⚡ AI Provisional Triage")[cite: 1, 2]
+else:
+    st.sidebar.info("⏳ Awaiting Cytology Review")[cite: 1, 2]
+
+st.sidebar.markdown(f"**Patient:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")[cite: 1, 2]
+st.sidebar.divider()[cite: 1, 2]
+
+role = st.sidebar.radio(
+    "Workflow Cadre View:",
+    [
+        "1. Medical Officer (Exam, POCUS & Direct Upload)",
+        "2. Lab Technician (Staining, Patient Link & Upload)",
+        "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
+        "4. CDSS Triage & Advisory Report",
+        "5. ASHA Closed-Loop Tracker",
+        "6. Audit Trail & Provenance (Who Did What)"
+    ]
+)[cite: 1, 2]
     # ==========================================
 # MODULE 1: MEDICAL OFFICER
 # ==========================================
