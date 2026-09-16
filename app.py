@@ -523,7 +523,7 @@ role = st.sidebar.radio(
         "6. Audit Trail & Provenance (Who Did What)"
     ]
 )
-```[cite: 1, 2]
+
 # --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
 def evaluate_image_quality(file_obj, threshold=70.0):
     try:
@@ -753,7 +753,6 @@ role = st.sidebar.radio(
         "5. ASHA Closed-Loop Tracker",
         "6. Audit Trail & Provenance (Who Did What)"
     ]
-)[cite: 1, 2]
     # ==========================================
 # MODULE 1: MEDICAL OFFICER
 # ==========================================
