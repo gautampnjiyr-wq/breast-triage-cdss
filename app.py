@@ -292,13 +292,7 @@ def voice_text_area(label, current_val, key_prefix, height=120):
         res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
         st.session_state[f"val_{key_prefix}"] = res
         return res
-```[cite: 1, 2]
 
----
-
-**Part 2 of 2: Quality Inspection, Adequacy Masking, WhatsApp Alerts, and Sidebar Navigation**
-
-```python
 # --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
 def evaluate_image_quality(file_obj, threshold=70.0):
     try:
