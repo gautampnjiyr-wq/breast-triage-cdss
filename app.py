@@ -42,14 +42,14 @@ def evaluate_image_quality(file_obj, threshold=70.0):
     except Exception:
         return True, 100.0
 
-# Helper: Automated Cytology Smear Adequacy & Cluster Detection
+# Helper: Automated Cytology Smear Adequacy & Cluster Detection (Area-Weighted)
 def analyze_smear_adequacy(file_obj, min_cluster_area=450):
     try:
         file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
         file_obj.seek(0)
         bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         if bgr is None:
-            return 0, None, False, "Corrupted Image"
+            return 0, None, False, "Corrupted Image", False
 
         # 1. Convert to HSV to isolate Romanowsky/Diff-Quik nuclear stain (Deep Violet/Blue)
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
@@ -57,7 +57,7 @@ def analyze_smear_adequacy(file_obj, min_cluster_area=450):
         upper_purple = np.array([165, 255, 215])
         nuclei_mask = cv2.inRange(hsv, lower_purple, upper_purple)
 
-        # 2. Morphological closing to merge packed nuclei into cohesive sheets
+        # 2. Morphological closing to merge closely packed nuclei into cohesive sheets
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         cluster_mask = cv2.morphologyEx(nuclei_mask, cv2.MORPH_CLOSE, kernel)
         clean_mask = cv2.morphologyEx(cluster_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
@@ -67,22 +67,33 @@ def analyze_smear_adequacy(file_obj, min_cluster_area=450):
 
         annotated_bgr = bgr.copy()
         valid_clusters = 0
+        has_mega_sheet = False
         total_pixels = bgr.shape[0] * bgr.shape[1]
         min_cluster_size = max(min_cluster_area, int(total_pixels * 0.0006))
+        mega_sheet_threshold = int(total_pixels * 0.035)  # >3.5% of field = diagnostic cohesive sheet
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
             if area >= min_cluster_size:
                 valid_clusters += 1
                 x, y, w, h = cv2.boundingRect(cnt)
-                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), (0, 230, 77), 2)
+
+                if area >= mega_sheet_threshold:
+                    has_mega_sheet = True
+                    box_color = (0, 255, 255)  # Yellow for large diagnostic sheets
+                    label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
+                else:
+                    box_color = (0, 230, 77)   # Green for standard clusters
+                    label = f"Cluster #{valid_clusters}"
+
+                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), box_color, 2)
                 cv2.putText(
                     annotated_bgr,
-                    f"Cluster #{valid_clusters}",
+                    label,
                     (x, max(20, y - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 230, 77),
+                    0.45,
+                    box_color,
                     1,
                     cv2.LINE_AA
                 )
@@ -90,20 +101,21 @@ def analyze_smear_adequacy(file_obj, min_cluster_area=450):
         _, buffer = cv2.imencode(".jpg", annotated_bgr)
         annotated_bytes = buffer.tobytes()
 
-        if valid_clusters >= 4:
-            status = "Adequate Cellularity (Cohesive Groups Present)"
+        # Yokohama criterion: Large cohesive sheet OR 4+ standard clusters in single FOV
+        if has_mega_sheet or valid_clusters >= 4:
+            status = "Adequate Cellularity (Diagnostic Architecture Present)"
             is_adequate = True
         elif 1 <= valid_clusters < 4:
-            status = "Borderline / Suboptimal Cellularity"
+            status = "Suboptimal in this Field (Check other fields)"
             is_adequate = False
         else:
-            status = "Acellular / Inadequate (Possible Dry Tap)"
+            status = "Acellular Field"
             is_adequate = False
 
-        return valid_clusters, annotated_bytes, is_adequate, status
+        return valid_clusters, annotated_bytes, is_adequate, status, has_mega_sheet
 
     except Exception as e:
-        return 0, None, False, f"Analysis Error: {e}"
+        return 0, None, False, f"Analysis Error: {e}", False
 
 # Helper: One-Click WhatsApp Referral Generator
 def generate_whatsapp_link(phone, patient_name, case_id, risk_banner, action_directive):
@@ -546,6 +558,7 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                 blurry_files = []
                 processed_images = []
                 total_detected_clusters = 0
+                any_mega_sheet_found = False
 
                 with st.spinner("Analyzing optical focus & cellular cluster density..."):
                     for uploaded in tech_new_files:
@@ -554,13 +567,17 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                             blurry_files.append((uploaded.name, sharpness))
                             continue
 
-                        clusters, annotated_bytes, is_adeq, adeq_status = analyze_smear_adequacy(uploaded)
+                        clusters, annotated_bytes, is_adeq, adeq_status, is_mega = analyze_smear_adequacy(uploaded)
                         total_detected_clusters += clusters
+                        if is_mega:
+                            any_mega_sheet_found = True
+
                         processed_images.append({
                             "file": uploaded,
                             "clusters": clusters,
                             "annotated": annotated_bytes,
-                            "status": adeq_status
+                            "status": adeq_status,
+                            "is_mega": is_mega
                         })
 
                 if blurry_files:
@@ -579,30 +596,37 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                     
                     for idx, p_img in enumerate(processed_images):
                         with preview_cols[idx % 3]:
+                            badge = " [Mega-Sheet Detected]" if p_img["is_mega"] else ""
                             st.image(
                                 p_img["annotated"],
-                                caption=f"{p_img['file'].name}: {p_img['clusters']} cluster(s)",
+                                caption=f"{p_img['file'].name}: {p_img['clusters']} cluster(s){badge}",
                                 use_container_width=True
                             )
 
-                    if total_detected_clusters < 6:
-                        st.error(
-                            f"⚠️ **YOKOHAMA ADEQUACY WARNING: ONLY {total_detected_clusters} TOTAL CLUSTER(S) DETECTED**\n\n"
-                            f"• **IAC Yokohama Standard:** Requires at least 6 cohesive clusters of ductal epithelial cells.\n"
-                            f"• **Clinical Action:** The sample appears **Acellular / Suboptimal**. Advise the Medical Officer to perform **Needle Pass #2 immediately** before the patient departs."
+                    # Diagnostic Adequacy Evaluation (Yokohama criteria)
+                    smear_pass = any_mega_sheet_found or total_detected_clusters >= 4
+
+                    if smear_pass:
+                        st.success(
+                            f"✅ **SMEAR ADEQUATE:** Diagnostic epithelial cellularity confirmed "
+                            f"({total_detected_clusters} cluster(s) / sheets across uploaded fields). "
+                            f"Meets IAC Yokohama criteria for diagnostic evaluation."
                         )
                     else:
-                        st.success(
-                            f"✅ **SMEAR ADEQUATE:** Detected **{total_detected_clusters} cohesive epithelial clusters**. Meets IAC Yokohama threshold for diagnostic evaluation."
+                        st.warning(
+                            f"⚠️ **LOW CELLULARITY IN CURRENT FIELD(S) ({total_detected_clusters} clusters detected):**\n\n"
+                            f"• Single photographs capture <2% of the total slide area.\n"
+                            f"• **Action:** If other fields on the glass slide have cells, pan stage and upload 2–3 more fields.\n"
+                            f"• If the entire physical slide is acellular, alert the Medical Officer for Needle Pass #2."
                         )
 
                     for p_img in processed_images:
                         img_entry = save_slide_image(p_img["file"], patient["case_id"], "Lab Technician", patient["prep_tech"])
                         patient["images"].append(img_entry)
 
-                    patient["macro_adequate"] = "Yes" if total_detected_clusters >= 6 else "Suboptimal (Low Cellularity on Tele-Screen)"
+                    patient["macro_adequate"] = "Yes" if smear_pass else "Suboptimal (Low Cellularity on Tele-Screen)"
                     patient["audit_log"].append(
-                        f"[{datetime.date.today()}] {len(processed_images)} photo(s) analyzed: {total_detected_clusters} clusters detected."
+                        f"[{datetime.date.today()}] {len(processed_images)} photo(s) analyzed: {total_detected_clusters} cluster(s) detected (Mega-Sheet: {any_mega_sheet_found})."
                     )
                     save_patient_record(patient)
                     st.toast("Micrographs uploaded and indexed.", icon="🔬")
