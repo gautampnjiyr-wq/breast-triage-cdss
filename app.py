@@ -293,7 +293,9 @@ def voice_text_area(label, current_val, key_prefix, height=120):
         res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
         st.session_state[f"val_{key_prefix}"] = res
         return res
-        def evaluate_image_quality(file_obj, threshold=70.0):
+
+# --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
+def evaluate_image_quality(file_obj, threshold=70.0):
     try:
         file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
         file_obj.seek(0)
@@ -338,6 +340,31 @@ def analyze_smear_adequacy(file_obj, min_cluster_area=450):
                 x, y, w, h = cv2.boundingRect(cnt)
                 if area >= mega_sheet_threshold:
                     has_mega_sheet = True
+                    box_color = (0, 255, 255)
+                    label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
+                else:
+                    box_color = (0, 230, 77)
+                    label = f"Cluster #{valid_clusters}"
+
+                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), box_color, 2)
+                cv2.putText(annotated_bgr, label, (x, max(20, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)
+
+        _, buffer = cv2.imencode(".jpg", annotated_bgr)
+        annotated_bytes = buffer.tobytes()
+
+        if has_mega_sheet or valid_clusters >= 4:
+            status = "Adequate Cellularity (Diagnostic Architecture Present)"
+            is_adequate = True
+        elif 1 <= valid_clusters < 4:
+            status = "Suboptimal in this Field (Check other fields)"
+            is_adequate = False
+        else:
+            status = "Acellular Field"
+            is_adequate = False
+
+        return valid_clusters, annotated_bytes, is_adequate, status, has_mega_sheet
+    except Exception as e:
+        return 0, None, False, f"Analysis Error: {e}", False
                     box_color = (0, 255, 255)
                     label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
                 else:
