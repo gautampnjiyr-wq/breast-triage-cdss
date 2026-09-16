@@ -42,6 +42,69 @@ def evaluate_image_quality(file_obj, threshold=70.0):
     except Exception:
         return True, 100.0
 
+# Helper: Automated Cytology Smear Adequacy & Cluster Detection
+def analyze_smear_adequacy(file_obj, min_cluster_area=450):
+    try:
+        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
+        file_obj.seek(0)
+        bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if bgr is None:
+            return 0, None, False, "Corrupted Image"
+
+        # 1. Convert to HSV to isolate Romanowsky/Diff-Quik nuclear stain (Deep Violet/Blue)
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        lower_purple = np.array([115, 35, 30])
+        upper_purple = np.array([165, 255, 215])
+        nuclei_mask = cv2.inRange(hsv, lower_purple, upper_purple)
+
+        # 2. Morphological closing to merge packed nuclei into cohesive sheets
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        cluster_mask = cv2.morphologyEx(nuclei_mask, cv2.MORPH_CLOSE, kernel)
+        clean_mask = cv2.morphologyEx(cluster_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+
+        # 3. Find connected contours (cell clusters)
+        contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        annotated_bgr = bgr.copy()
+        valid_clusters = 0
+        total_pixels = bgr.shape[0] * bgr.shape[1]
+        min_cluster_size = max(min_cluster_area, int(total_pixels * 0.0006))
+
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area >= min_cluster_size:
+                valid_clusters += 1
+                x, y, w, h = cv2.boundingRect(cnt)
+                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), (0, 230, 77), 2)
+                cv2.putText(
+                    annotated_bgr,
+                    f"Cluster #{valid_clusters}",
+                    (x, max(20, y - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 230, 77),
+                    1,
+                    cv2.LINE_AA
+                )
+
+        _, buffer = cv2.imencode(".jpg", annotated_bgr)
+        annotated_bytes = buffer.tobytes()
+
+        if valid_clusters >= 4:
+            status = "Adequate Cellularity (Cohesive Groups Present)"
+            is_adequate = True
+        elif 1 <= valid_clusters < 4:
+            status = "Borderline / Suboptimal Cellularity"
+            is_adequate = False
+        else:
+            status = "Acellular / Inadequate (Possible Dry Tap)"
+            is_adequate = False
+
+        return valid_clusters, annotated_bytes, is_adequate, status
+
+    except Exception as e:
+        return 0, None, False, f"Analysis Error: {e}"
+
 # Helper: One-Click WhatsApp Referral Generator
 def generate_whatsapp_link(phone, patient_name, case_id, risk_banner, action_directive):
     clean_digits = "".join(filter(str.isdigit, str(phone)))
@@ -117,7 +180,7 @@ def fetch_patient_registry():
         }
     return st.session_state.patients
 
-# Helper: Save patient data permanently
+# Helper: Save patient record
 def save_patient_record(patient_dict):
     if HAS_SUPABASE:
         try:
@@ -129,7 +192,7 @@ def save_patient_record(patient_dict):
             st.error(f"Error saving to cloud database: {e}")
     st.session_state.patients[patient_dict["case_id"]] = patient_dict
 
-# Helper: Upload photo to Supabase bucket
+# Helper: Upload photo to Supabase
 def save_slide_image(file_obj, case_id, role, uploader_name):
     timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     if HAS_SUPABASE:
@@ -363,53 +426,8 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
 
         if st.button("Save Clinical & Ultrasound Findings"):
             save_patient_record(patient)
-            st.success("Clinical exam data saved permanently.")
-
-        st.divider()
-        st.markdown("#### Direct Micrograph Upload with Blur Filter")
-        mo_new_files = st.file_uploader(
-            "Add Slide Photos as MO (10x & 40x):",
-            type=["jpg", "png", "jpeg"],
-            accept_multiple_files=True,
-            key="mo_img_uploader"
-        )
-        if mo_new_files:
-            if st.button("Upload Photos to Cloud"):
-                uploaded_count = 0
-                for uploaded in mo_new_files:
-                    is_sharp, sharpness = evaluate_image_quality(uploaded)
-                    if not is_sharp:
-                        st.warning(f"⚠️ `{uploaded.name}` has low sharpness ({sharpness} < 70). Uploading anyway, but recommend refocusing.")
-                    img_entry = save_slide_image(uploaded, patient["case_id"], "Medical Officer", patient["referral_doc"])
-                    patient["images"].append(img_entry)
-                    uploaded_count += 1
-                patient["audit_log"].append(f"[{datetime.date.today()}] {uploaded_count} photo(s) uploaded by MO")
-                save_patient_record(patient)
-                st.success(f"Attached {uploaded_count} photo(s).")
-                st.rerun()
-
-    # Gallery display with deletion in MO Module
-    if patient.get("images"):
-        st.divider()
-        st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
-        img_cols = st.columns(min(len(patient["images"]), 4))
-        for idx, item in enumerate(patient["images"]):
-            with img_cols[idx % 4]:
-                if "url" in item:
-                    st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
-                elif "file" in item:
-                    st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
-                
-                if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
-                    delete_slide_image(item)
-                    patient["images"].pop(idx)
-                    patient["audit_log"].append(
-                        f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})"
-                    )
-                    save_patient_record(patient)
-                    st.success(f"Field #{idx+1} deleted.")
-                    st.rerun()
-                    # ==========================================
+            st.success("Clinical exam data saved permanently
+            # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
@@ -455,7 +473,7 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
             st.success("Staining details updated.")
 
     with col2:
-        st.markdown("#### Smartphone Micrograph Upload & Lens Quality Check")
+        st.markdown("#### Smartphone Micrograph Upload & AI Adequacy Gate")
         tech_new_files = st.file_uploader(
             "Attach Slide Photos as Technician:",
             type=["jpg", "png", "jpeg"],
@@ -463,19 +481,66 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
             key="tech_img_uploader"
         )
         if tech_new_files:
-            if st.button("Upload Tech Photos"):
-                tech_added = 0
-                for uploaded in tech_new_files:
-                    is_sharp, sharpness = evaluate_image_quality(uploaded)
-                    if not is_sharp:
-                        st.warning(f"⚠️ `{uploaded.name}` is blurry (Score: {sharpness}). Recommend wiping lens and refocusing.")
-                    img_entry = save_slide_image(uploaded, patient["case_id"], "Lab Technician", patient["prep_tech"])
-                    patient["images"].append(img_entry)
-                    tech_added += 1
-                patient["audit_log"].append(f"[{datetime.date.today()}] {tech_added} photo(s) added by Tech ({patient['prep_tech']})")
-                save_patient_record(patient)
-                st.success(f"Attached {tech_added} photo(s).")
-                st.rerun()
+            if st.button("🔬 Analyze Adequacy & Upload to Cloud"):
+                blurry_files = []
+                processed_images = []
+                total_detected_clusters = 0
+
+                with st.spinner("Analyzing optical focus & cellular cluster density..."):
+                    for uploaded in tech_new_files:
+                        is_sharp, sharpness = evaluate_image_quality(uploaded)
+                        if not is_sharp:
+                            blurry_files.append((uploaded.name, sharpness))
+                            continue
+
+                        clusters, annotated_bytes, is_adeq, adeq_status = analyze_smear_adequacy(uploaded)
+                        total_detected_clusters += clusters
+                        processed_images.append({
+                            "file": uploaded,
+                            "clusters": clusters,
+                            "annotated": annotated_bytes,
+                            "status": adeq_status
+                        })
+
+                if blurry_files:
+                    for fname, score in blurry_files:
+                        st.error(
+                            f"🚫 **Upload Rejected for `{fname}`**\n\n"
+                            f"• **Sharpness Score:** `{score}` (Minimum required: `70.0`)\n"
+                            f"• **Issue:** Severe blur / camera shake detected.\n"
+                            f"• **Action:** Clean microscope eyepiece, refocus objective, and capture again."
+                        )
+                    st.info("💡 Blurry photos blocked. Fix focus and retry.")
+
+                elif processed_images:
+                    st.markdown("##### Real-Time Cluster Detection Viewfinder:")
+                    preview_cols = st.columns(min(len(processed_images), 3))
+                    
+                    for idx, p_img in enumerate(processed_images):
+                        with preview_cols[idx % 3]:
+                            st.image(p_img["annotated"], caption=f"{p_img['file'].name}: {p_img['clusters']} cluster(s)", use_container_width=True)
+
+                    if total_detected_clusters < 6:
+                        st.error(
+                            f"⚠️ **YOKOHAMA ADEQUACY WARNING: ONLY {total_detected_clusters} TOTAL CLUSTER(S) DETECTED**\n\n"
+                            f"• **IAC Yokohama Standard:** Requires at least 6 cohesive clusters of ductal epithelial cells.\n"
+                            f"• **Clinical Action:** The sample appears **Acellular / Suboptimal**. Advise the Medical Officer to perform **Needle Pass #2 immediately** before the patient departs."
+                        )
+                    else:
+                        st.success(
+                            f"✅ **SMEAR ADEQUATE:** Detected **{total_detected_clusters} cohesive epithelial clusters**. Meets IAC Yokohama threshold for diagnostic evaluation."
+                        )
+
+                    for p_img in processed_images:
+                        img_entry = save_slide_image(p_img["file"], patient["case_id"], "Lab Technician", patient["prep_tech"])
+                        patient["images"].append(img_entry)
+
+                    patient["macro_adequate"] = "Yes" if total_detected_clusters >= 6 else "Suboptimal (Low Cellularity on Tele-Screen)"
+                    patient["audit_log"].append(
+                        f"[{datetime.date.today()}] {len(processed_images)} photo(s) analyzed: {total_detected_clusters} clusters detected."
+                    )
+                    save_patient_record(patient)
+                    st.toast("Micrographs uploaded and indexed.", icon="🔬")
 
     # Gallery display with deletion in Tech Module
     if patient.get("images"):
@@ -521,6 +586,9 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
         * **Total Micrographs Attached:** {len(patient.get('images', []))}
         """)
 
+        if "Suboptimal" in patient.get("macro_adequate", ""):
+            st.warning("⚠️ **Smear Adequacy Alert:** Cellularity was flagged as suboptimal (<6 clusters). Consider Yokohama Category 1.")
+
         st.divider()
         st.markdown("#### Microscopic Slide Review")
         if patient.get("images"):
@@ -547,6 +615,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                 "The report will be prominently marked as **Provisional AI-Generated**."
             )
 
+            default_idx = 1 if "Suboptimal" in patient.get("macro_adequate", "") else 0
             ai_preset = st.selectbox(
                 "AI Computer-Aided Morphology Inference:",
                 [
@@ -554,7 +623,8 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                     "Pattern detected: Hypocellular, proteinaceous/acellular fluid, rare ductal clusters (Inadequate sampling)",
                     "Pattern detected: Pleomorphic cells, dyscohesive clusters, prominent nucleoli, necrotic background (High-Grade Malignancy)",
                     "Pattern detected: Mild nuclear enlargement, crowded 3D clusters with preserved cohesion (Atypical / Indeterminate)"
-                ]
+                ],
+                index=default_idx
             )
 
             if st.button("⚡ Run AI Analysis & Save Provisional Triage"):
@@ -606,7 +676,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                 save_patient_record(patient)
                 st.success("Official cytology report saved to database.")
                 st.rerun()
-                # ==========================================
+            # ==========================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
 # ==========================================
 elif role == "4. CDSS Triage & Advisory Report":
