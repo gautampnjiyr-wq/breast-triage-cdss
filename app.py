@@ -292,7 +292,8 @@ def voice_text_area(label, current_val, key_prefix, height=120):
         res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
         st.session_state[f"val_{key_prefix}"] = res
         return res
-        # --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
+
+# --- IMAGE QUALITY & SMEAR ADEQUACY HELPERS ---
 def evaluate_image_quality(file_obj, threshold=70.0):
     try:
         file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
@@ -401,238 +402,7 @@ def generate_mo_signoff_alert_link(phone, patient):
     msg = (
         f"✅ *CYTOLOGY REPORT SIGNED OFF & FINALIZED*\n\n"
         f"• *Patient:* {patient['name']} (Case ID: `{patient['case_id']}`)\n"
-        f"• *Evaluating Pathologist:* {patient.get('pathologist', '')}\n"
-        f"• *IAC Yokohama Category:* {patient.get('yokohama', '')}\n"
-        f"• *Notes:* {patient.get('path_notes', 'N/A')}\n\n"
-        f"Proceed to Module 4 to view CDSS Concordance Triage and print advisory report."
-    )
-    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
-
-def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_url):
-    clean_digits = "".join(filter(str.isdigit, str(target_phone)))
-    if len(clean_digits) == 10:
-        clean_digits = "91" + clean_digits
-
-    case_id = patient.get("case_id", "")
-    p_name = patient.get("name", "")
-    yokohama = patient.get("yokohama", "Under Evaluation")
-
-    if recipient_type == "Patient / Family":
-        msg = (
-            f"नमस्ते {p_name} जी,\n\n"
-            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है।\n"
-            f"• *केस आईडी:* `{case_id}`\n"
-            f"• *जांच केंद्र:* {patient.get('referral_doc', 'Primary Health Centre')}\n\n"
-            f"📄 *अपनी आधिकारिक रिपोर्ट देखने के लिए यहाँ क्लिक करें:* {report_url}\n\n"
-            f"कृपया यह पर्ची अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं।"
-        )
-    elif recipient_type == "Consulting Pathologist":
-        msg = (
-            f"🔬 *FINALIZED CYTOLOGY & TRIAGE ADVISORY ARCHIVE*\n\n"
-            f"• *Patient:* {p_name} ({patient.get('age', '')}y, F)\n"
-            f"• *Case ID:* `{case_id}` | *UHID:* `{patient.get('uhid', '')}`\n"
-            f"• *Yokohama Category:* {yokohama}\n"
-            f"• *Signed By:* {patient.get('pathologist', 'Pathologist')}\n\n"
-            f"📥 *Digital Slip Link:* {report_url}"
-        )
-    elif recipient_type == "Examining Medical Officer (MO)":
-        msg = (
-            f"🩺 *BEDSIDE TRIAGE ADVISORY & CONCORDANCE SUMMARY*\n\n"
-            f"• *Patient:* {p_name} | *Case ID:* `{case_id}`\n"
-            f"• *Examining MO:* {patient.get('referral_doc', '')}\n"
-            f"• *IAC Yokohama Result:* {yokohama}\n"
-            f"• *Action Directive:* Core Biopsy referral status enclosed in advisory.\n\n"
-            f"📄 *View/Print Signed PDF Slip:* {report_url}"
-        )
-    else:
-        msg = (
-            f"📋 *BREAST HEALTH TRIAGE RECORD*\n\n"
-            f"• *Patient:* {p_name} (Case ID: `{case_id}`)\n"
-            f"• *Status:* {yokohama}\n"
-            f"• *Assigned ASHA:* {patient.get('asha_worker', 'N/A')}\n\n"
-            f"📄 *Digital Report Link:* {report_url}"
-        )
-
-    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
-
-def save_slide_image(file_obj, case_id, role, uploader_name):
-    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    if HAS_SUPABASE:
-        try:
-            filename = f"{case_id}_{uuid.uuid4().hex[:6]}.jpg"
-            file_bytes = file_obj.getvalue()
-            supabase.storage.from_("slide-micrographs").upload(
-                path=filename,
-                file=file_bytes,
-                file_options={"content-type": file_obj.type or "image/jpeg"}
-            )
-            image_url = supabase.storage.from_("slide-micrographs").get_public_url(filename)
-            return {"url": image_url, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
-        except Exception as e:
-            st.error(f"Cloud image upload error: {e}")
-    return {"file": file_obj, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
-
-def delete_slide_image(image_item):
-    if HAS_SUPABASE and "url" in image_item:
-        try:
-            filename = image_item["url"].split("/")[-1]
-            supabase.storage.from_("slide-micrographs").remove([filename])
-        except Exception as e:
-            st.error(f"Cloud storage deletion error: {e}")
-
-# Sidebar Selection
-if "active_case_id" not in st.session_state or st.session_state.active_case_id not in st.session_state.patients:
-    st.session_state.active_case_id = list(st.session_state.patients.keys())[0]
-
-st.sidebar.title("🩺 Breast Triage CDSS")
-st.sidebar.caption("Point-of-Care Triple Assessment + Whisper AI")
-
-if HAS_SUPABASE:
-    st.sidebar.success("🟢 Cloud Sync: Active (Supabase)")
-else:
-    st.sidebar.warning("🟡 Storage: RAM Session")
-
-case_options = list(st.session_state.patients.keys())
-selected_case = st.sidebar.selectbox(
-    "Active Patient Case:",
-    options=case_options,
-    index=case_options.index(st.session_state.active_case_id) if st.session_state.active_case_id in case_options else 0
-)
-st.session_state.active_case_id = selected_case
-patient = st.session_state.patients[st.session_state.active_case_id]
-
-if patient.get("review_mode") == "Final Pathologist Sign-Off":
-    st.sidebar.success("● Pathologist Reviewed")
-elif patient.get("review_mode") == "AI Provisional":
-    st.sidebar.warning("⚡ AI Provisional Triage")
-else:
-    st.sidebar.info("⏳ Awaiting Cytology Review")
-
-st.sidebar.markdown(f"**Patient:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")
-st.sidebar.divider()
-
-role = st.sidebar.radio(
-    "Workflow Cadre View:",
-    [
-        "1. Medical Officer (Exam, POCUS & Direct Upload)",
-        "2. Lab Technician (Staining, Patient Link & Upload)",
-        "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
-        "4. CDSS Triage & Advisory Report",
-        "5. ASHA Closed-Loop Tracker",
-        "6. Audit Trail & Provenance (Who Did What)"
-    ]
-)
-
-# ==========================================
-# MODULE 1: MEDICAL OFFICER
-# ==========================================
-if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
-    st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
-    st.caption("All text inputs support hands-free Whisper dictation (tap 🎙️ beside any field).")
-
-    tab_edit, tab_register, tab_abha = st.tabs(["📝 View / Edit Current", "➕ Register New", "🪪 ABHA Auto-Fill"])
-
-    with tab_abha:
-        st.subheader("Fast Intake via ABHA QR Code Data")
-        abha_raw = st.text_area(
-            "Paste Scanned ABHA Card QR Text / JSON String:",
-            placeholder='{"hid": "91-1234-5678-9012", "name": "Kavita Devi", "gender": "F", "dob": "1981-05-12", "pincode": "248001"}'
-        )
-        if st.button("Parse ABHA Data"):
-            try:
-                data = json.loads(abha_raw)
-                calc_age = 45
-                if "dob" in data:
-                    birth_year = int(str(data["dob"])[:4])
-                    calc_age = datetime.date.today().year - birth_year
-                patient["name"] = data.get("name", patient["name"])
-                patient["uhid"] = data.get("hid", data.get("healthId", patient["uhid"]))
-                patient["age"] = int(data.get("age", calc_age))
-                patient["pincode"] = str(data.get("pincode", patient["pincode"]))
-                save_patient_record(patient)
-                st.success("Demographics auto-filled from ABHA profile.")
-                st.rerun()
-            except Exception:
-                st.error("Invalid QR format. Ensure standard ABHA JSON text is entered.")
-
-    with tab_register:
-        with st.form("new_patient_form"):
-            st.subheader("New Patient Intake")
-            c1, c2, c3 = st.columns(3)
-            new_name = c1.text_input("Full Name")
-            new_age = c2.number_input("Age (Years)", 15, 100, 45)
-            new_uhid = c3.text_input("UHID / National Health ID")
-            new_case_id = c1.text_input("Case ID (Unique)", f"PB-2026-{len(st.session_state.patients)+1001}")
-            new_pincode = c2.text_input("Pincode", "248001")
-            new_doc = c3.text_input("Examining MO Name", "Dr. Rajiv Singh, MBBS")
-            
-            st.markdown("##### Community Health Worker Assignment")
-            a1, a2, a3 = st.columns(3)
-            new_asha_name = a1.text_input("ASHA Worker Name", "Meena Devi")
-            new_asha_phone = a2.text_input("ASHA Phone (10 digits)", "")
-            new_asha_area = a3.text_input("Assigned Sector / Village", "Sub-Center Sector 1")
-            
-            submit_new = st.form_submit_button("Register & Activate Record")
-
-            if submit_new and new_case_id:
-                new_patient = {
-                    "name": new_name or "New Patient",
-                    "age": int(new_age),
-                    "uhid": new_uhid or "PENDING",
-                    "case_id": new_case_id,
-                    "date_exam": datetime.date.today(),
-                    "pincode": new_pincode,
-                    "referral_doc": new_doc,
-                    "cbe_mass": "Firm, Discrete, Moderately mobile",
-                    "cbe_size": "2.5 cm",
-                    "cbe_nodes": "Absent (Clinically negative)",
-                    "cbe_notes": "",
-                    "pocus_available": False,
-                    "pocus_orientation": "Wider-than-tall (Horizontal / Parallel to skin)",
-                    "pocus_margins": "Smooth & Well-defined",
-                    "pocus_posterior": "Posterior acoustic enhancement (or neutral)",
-                    "fnac_passes": "2 passes (23G Needle, Capillary method)",
-                    "prep_tech": "Unassigned",
-                    "staining": "Diff-Quik (90-second rapid Romanowsky)",
-                    "macro_adequate": "Pending Assessment",
-                    "images": [],
-                    "review_mode": "Awaiting Review",
-                    "pathologist": "Pending Review",
-                    "yokohama": "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
-                    "path_notes": "Awaiting slide image review.",
-                    "asha_worker": new_asha_name,
-                    "asha_contact": new_asha_phone,
-                    "asha_area": new_asha_area,
-                    "tracker_status": "Referral Pending (Counseling completed at PHC)",
-                    "audit_log": [f"[{datetime.date.today()}] Record created by {new_doc}"]
-                }
-                save_patient_record(new_patient)
-                st.session_state.active_case_id = new_case_id
-                st.success(f"Case {new_case_id} registered successfully.")
-                st.rerun()
-
-    with tab_edit:
-        st.subheader(f"Demographic & Clinical Profile: {patient['name']} ({patient['case_id']})")
-        
-        with st.expander("✏️ Edit Demographics & ASHA Assignment (Voice-Enabled)", expanded=False):
-            ed1, ed2, ed3 = st.columns(3)
-            patient["name"] = voice_text_input("Patient Full Name:", patient.get("name", ""), "mo_pname")
-            patient["age"] = ed2.number_input("Age:", 15, 100, int(patient.get("age", 45)))
-            patient["uhid"] = voice_text_input("UHID:", patient.get("uhid", ""), "mo_puhid")
-            patient["pincode"] = voice_text_input("Pincode:", patient.get("pincode", ""), "mo_ppincode")
-            patient["referral_doc"] = voice_text_input("Examining MO:", patient.get("referral_doc", ""), "mo_pdoc")
-
-            st.markdown("##### Assigned ASHA / Community Health Worker")
-            patient["asha_worker"] = voice_text_input("ASHA Worker Name:", patient.get("asha_worker", ""), "mo_ashaname")
-            patient["asha_contact"] = voice_text_input("ASHA Phone Number:", patient.get("asha_contact", ""), "mo_ashaphone")
-            patient["asha_area"] = voice_text_input("ASHA Assigned Area / Village:", patient.get("asha_area", ""), "mo_ashaarea")
-
-            if st.button("Save Profile & ASHA Details"):
-                patient["audit_log"].append(f"[{datetime.date.today()}] Profile updated by MO")
-                save_patient_record(patient)
-                st.success("Details updated.")
-
-# ==========================================
+    # ==========================================
 # MODULE 1: MEDICAL OFFICER
 # ==========================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
@@ -648,9 +418,10 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
         st.subheader("Fast Intake via ABHA QR Code Data")
         abha_raw = st.text_area(
             "Paste Scanned ABHA Card QR Text / JSON String:",
-            placeholder='{"hidn":"21-4560-1406-6251","hid":"21456014066251@abdm","name":"GEETHA","gender":"F","dob":"24-01-2003","mobile":"9843187603","address":"105, WEST STREET, MANAKADAVU POST, Dharapuram, Tiruppur, Tamil Nadu"}'
+            placeholder='{"hidn":"21-4560-1406-6251","hid":"21456014066251@abdm","name":"GEETHA","gender":"F","dob":"24-01-2003","mobile":"9843187603","address":"105, WEST STREET, MANAKADAVU POST, Dharapuram, Tiruppur, Tamil Nadu"}',
+            key="input_abha_qr_raw"
         )
-        if st.button("Parse ABHA Data"):
+        if st.button("Parse ABHA Data", key="btn_parse_abha_unique"):
             try:
                 import re
                 data = json.loads(abha_raw.strip())
@@ -885,8 +656,8 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
         patient["pathologist_phone"] = path_ph
         path_alert_url = generate_pathologist_alert_link(path_ph, patient)
         st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
-# ==========================================
-# MODULE 2: LAB TECHNICIAN (0 spaces)
+        # ==========================================
+# MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
     st.header("2. Laboratory Technician: Slide Staining & Tele-Imaging")
@@ -1017,7 +788,6 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
     patient["pathologist_phone"] = t_path_phone
     tech_alert_url = generate_pathologist_alert_link(t_path_phone, patient)
     st.link_button("📲 Send Case to Pathologist (WhatsApp)", tech_alert_url)
-
 # =========================================================
 # MODULE 3: CYTOLOGY REVIEW (AI ASSISTANCE + REPORTING BOX)
 # =========================================================
@@ -1109,7 +879,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
         st.markdown("### 📝 Official Pathologist Reporting Box")
         st.caption("Use live Whisper voice dictation (🎙️) or import the AI draft to quickly finalize findings.")
 
-        if st.button("📥 Import AI Draft into Reporting Box"):
+        if st.button("📥 Import AI Draft into Reporting Box", key="btn_import_ai_draft"):
             patient["path_notes"] = draft_text
             patient["yokohama"] = suggested_cat
             st.session_state["val_path_obs"] = draft_text
@@ -1132,7 +902,12 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
         curr_yok = patient.get("yokohama", yokohama_categories[1])
         matched_idx = next((i for i, cat in enumerate(yokohama_categories) if curr_yok[:10] in cat), 1)
 
-        patient["yokohama"] = st.selectbox("Final IAC Yokohama Diagnostic Category:", options=yokohama_categories, index=matched_idx)
+        patient["yokohama"] = st.selectbox(
+            "Final IAC Yokohama Diagnostic Category:",
+            options=yokohama_categories,
+            index=matched_idx,
+            key="select_yokohama_cat"
+        )
 
         patient["path_notes"] = voice_text_area(
             "Microscopic Observations & Remarks (Dictate with Whisper):",
@@ -1143,7 +918,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
 
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button("💾 Submit & Sign Official Report", type="primary"):
+            if st.button("💾 Submit & Sign Official Report", type="primary", key="btn_submit_sign_path"):
                 patient["review_mode"] = "Final Pathologist Sign-Off"
                 patient["audit_log"].append(f"[{datetime.date.today()}] Cytology signed off by {patient['pathologist']} ({patient['yokohama'][:10]})")
                 save_patient_record(patient)
@@ -1151,7 +926,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                 st.session_state["show_mo_notify"] = True
 
         with col_btn2:
-            if st.button("⚡ Save as Provisional (AI Assist Only)"):
+            if st.button("⚡ Save as Provisional (AI Assist Only)", key="btn_save_provisional_ai"):
                 patient["review_mode"] = "AI Provisional"
                 patient["pathologist"] = "AI Computer-Aided Screener (Provisional)"
                 patient["audit_log"].append(f"[{datetime.date.today()}] Provisional AI classification saved ({patient['yokohama'][:10]})")
@@ -1169,83 +944,83 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
 # ==========================================
 elif role == "4. CDSS Triage & Advisory Report":
-    st.header(f"4. CDSS Triage Advisory: {patient['name']} ({patient['case_id']})")
+    st.header(f"4. CDSS Triage Advisory: {patient['name']} ({patient['case_id']})")[cite: 1, 2]
 
-    is_ai_mode = patient.get("review_mode") == "AI Provisional"
+    is_ai_mode = patient.get("review_mode") == "AI Provisional"[cite: 1, 2]
     if is_ai_mode:
-        st.warning("⚠️ **NOTICE: THIS REPORT USES PROVISIONAL AI CYTOLOGY INFERENCE. AWAITING PATHOLOGIST REVIEW.**")
+        st.warning("⚠️ **NOTICE: THIS REPORT USES PROVISIONAL AI CYTOLOGY INFERENCE. AWAITING PATHOLOGIST REVIEW.**")[cite: 1, 2]
 
-    cbe_suspicious = "Hard, Irregular" in patient.get("cbe_mass", "") or "Present" in patient.get("cbe_nodes", "")
-    usg_suspicious = False
-    if patient.get("pocus_available"):
+    cbe_suspicious = "Hard, Irregular" in patient.get("cbe_mass", "") or "Present" in patient.get("cbe_nodes", "")[cite: 1, 2]
+    usg_suspicious = False[cite: 1, 2]
+    if patient.get("pocus_available"):[cite: 1, 2]
         usg_suspicious = (
             "Taller-than-wide" in patient.get("pocus_orientation", "") or
             "Irregular" in patient.get("pocus_margins", "") or
             "shadowing" in patient.get("pocus_posterior", "")
-        )
+        )[cite: 1, 2]
 
-    clinical_high_risk = cbe_suspicious or usg_suspicious
-    yokohama = patient.get("yokohama", "")
+    clinical_high_risk = cbe_suspicious or usg_suspicious[cite: 1, 2]
+    yokohama = patient.get("yokohama", "")[cite: 1, 2]
 
     # Concordance Logic
-    if clinical_high_risk and "Category 2: Benign" in yokohama:
-        status_banner = "CRITICAL DISCORDANCE (HIGH RISK FLAGS)"
-        status_color = "red"
+    if clinical_high_risk and "Category 2: Benign" in yokohama:[cite: 1, 2]
+        status_banner = "CRITICAL DISCORDANCE (HIGH RISK FLAGS)"[cite: 1, 2]
+        status_color = "red"[cite: 1, 2]
         analysis_text = (
             "Physical examination and/or bedside ultrasound demonstrate high-suspicion features, "
             "yet cytology is reported as benign. FNAB has a recognized sampling miss rate in dense, "
             "fibrous, or scirrhous tumors. Residual post-test malignancy risk remains ~20%–30%."
-        )
-        action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy based on benign cytology alone is unsafe."
+        )[cite: 1, 2]
+        action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy based on benign cytology alone is unsafe."[cite: 1, 2]
 
-    elif clinical_high_risk and "Category 1: Insufficient" in yokohama:
-        status_banner = "HIGH-RISK INADEQUACY (SUSPECTED DESMOPLASTIC MASS)"
-        status_color = "red"
+    elif clinical_high_risk and "Category 1: Insufficient" in yokohama:[cite: 1, 2]
+        status_banner = "HIGH-RISK INADEQUACY (SUSPECTED DESMOPLASTIC MASS)"[cite: 1, 2]
+        status_color = "red"[cite: 1, 2]
         analysis_text = (
             "Bedside ultrasound or clinical palpation indicates high suspicion, but needle cytology yielded inadequate cellularity. "
             "Invasive carcinomas with dense fibrous stroma frequently produce hypocellular aspirates. "
             "An inadequate smear in this setting must be managed with high suspicion."
-        )
-        action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY (CNB)."
+        )[cite: 1, 2]
+        action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY (CNB)."[cite: 1, 2]
 
-    elif not clinical_high_risk and "Category 1: Insufficient" in yokohama:
-        status_banner = "INSUFFICIENT SAMPLING (LOW CLINICAL SUSPICION)"
-        status_color = "orange"
-        analysis_text = "Cytology sample contains inadequate diagnostic epithelial groups (Baseline Risk: 10%–25%)."
-        action_text = "REPEAT GUIDED FNAB OR REFER FOR DIAGNOSTIC BREAST ULTRASOUND within 2–3 weeks."
+    elif not clinical_high_risk and "Category 1: Insufficient" in yokohama:[cite: 1, 2]
+        status_banner = "INSUFFICIENT SAMPLING (LOW CLINICAL SUSPICION)"[cite: 1, 2]
+        status_color = "orange"[cite: 1, 2]
+        analysis_text = "Cytology sample contains inadequate diagnostic epithelial groups (Baseline Risk: 10%–25%)."[cite: 1, 2]
+        action_text = "REPEAT GUIDED FNAB OR REFER FOR DIAGNOSTIC BREAST ULTRASOUND within 2–3 weeks."[cite: 1, 2]
 
-    elif "Category 4: Suspicious" in yokohama or "Category 5: Malignant" in yokohama:
-        status_banner = "CONCORDANT SUSPICIOUS / MALIGNANT PROFILE"
-        status_color = "red"
-        analysis_text = "Cytomorphological features unequivocally identify or strongly favor neoplasia (Risk: 60% to >97%)."
-        action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 profiling) and definitive oncology staging."
+    elif "Category 4: Suspicious" in yokohama or "Category 5: Malignant" in yokohama:[cite: 1, 2]
+        status_banner = "CONCORDANT SUSPICIOUS / MALIGNANT PROFILE"[cite: 1, 2]
+        status_color = "red"[cite: 1, 2]
+        analysis_text = "Cytomorphological features unequivocally identify or strongly favor neoplasia (Risk: 60% to >97%)."[cite: 1, 2]
+        action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 profiling) and definitive oncology staging."[cite: 1, 2]
 
-    elif "Category 3: Atypical" in yokohama:
-        status_banner = "ATYPICAL CYTOLOGY (EQUIVOCAL)"
-        status_color = "orange"
-        analysis_text = "Smear exhibits architectural or nuclear atypia (Risk of Malignancy: 15%–50%)."
-        action_text = "REFER FOR HISTOPATHOLOGIC EVALUATION (Core-Needle Biopsy or diagnostic excision)."
+    elif "Category 3: Atypical" in yokohama:[cite: 1, 2]
+        status_banner = "ATYPICAL CYTOLOGY (EQUIVOCAL)"[cite: 1, 2]
+        status_color = "orange"[cite: 1, 2]
+        analysis_text = "Smear exhibits architectural or nuclear atypia (Risk of Malignancy: 15%–50%)."[cite: 1, 2]
+        action_text = "REFER FOR HISTOPATHOLOGIC EVALUATION (Core-Needle Biopsy or diagnostic excision)."[cite: 1, 2]
 
     else:
-        status_banner = "CONCORDANT BENIGN PROFILE"
-        status_color = "green"
-        analysis_text = "Physical examination, bedside sonography, and cytology findings align without suspicious features."
-        action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on self-awareness warning signs."
+        status_banner = "CONCORDANT BENIGN PROFILE"[cite: 1, 2]
+        status_color = "green"[cite: 1, 2]
+        analysis_text = "Physical examination, bedside sonography, and cytology findings align without suspicious features."[cite: 1, 2]
+        action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on self-awareness warning signs."[cite: 1, 2]
 
-    prefix = "[PROVISIONAL AI ASSIST] " if is_ai_mode else ""
-    if status_color == "red":
-        st.error(f"🚨 **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
-    elif status_color == "orange":
-        st.warning(f"⚠️ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+    prefix = "[PROVISIONAL AI ASSIST] " if is_ai_mode else ""[cite: 1, 2]
+    if status_color == "red":[cite: 1, 2]
+        st.error(f"🚨 **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")[cite: 1, 2]
+    elif status_color == "orange":[cite: 1, 2]
+        st.warning(f"⚠️ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")[cite: 1, 2]
     else:
-        st.success(f"✅ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+        st.success(f"✅ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")[cite: 1, 2]
 
     # --- MULTI-CADRE WHATSAPP DISPATCH CONSOLE ---
-    st.divider()
-    st.markdown("### 📤 Dispatch Official Report via WhatsApp")
-    st.caption("Patients receive a private link showing ONLY their signed report slip (no app interface or tools).")
+    st.divider()[cite: 1, 2]
+    st.markdown("### 📤 Dispatch Official Report via WhatsApp")[cite: 1, 2]
+    st.caption("Patients receive a private link showing ONLY their signed report slip (no app interface or tools).")[cite: 1, 2]
 
-    r_col1, r_col2 = st.columns([1.5, 2])
+    r_col1, r_col2 = st.columns([1.5, 2])[cite: 1, 2]
     recipient_type = r_col1.selectbox(
         "Send Report To:",
         [
@@ -1254,51 +1029,53 @@ elif role == "4. CDSS Triage & Advisory Report":
             "Consulting Pathologist",
             "Assigned ASHA Worker",
             "Specific / Custom Contact"
-        ]
-    )
+        ],
+        key="m4_recipient_select"
+    )[cite: 1, 2]
 
-    if recipient_type == "Patient / Family":
-        default_phone = patient.get("patient_contact", "")
-    elif recipient_type == "Examining Medical Officer (MO)":
-        default_phone = patient.get("mo_contact", "9876543210")
-    elif recipient_type == "Consulting Pathologist":
-        default_phone = patient.get("pathologist_phone", "9876543210")
-    elif recipient_type == "Assigned ASHA Worker":
-        default_phone = patient.get("asha_contact", "")
+    if recipient_type == "Patient / Family":[cite: 1, 2]
+        default_phone = patient.get("patient_contact", "")[cite: 1, 2]
+    elif recipient_type == "Examining Medical Officer (MO)":[cite: 1, 2]
+        default_phone = patient.get("mo_contact", "9876543210")[cite: 1, 2]
+    elif recipient_type == "Consulting Pathologist":[cite: 1, 2]
+        default_phone = patient.get("pathologist_phone", "9876543210")[cite: 1, 2]
+    elif recipient_type == "Assigned ASHA Worker":[cite: 1, 2]
+        default_phone = patient.get("asha_contact", "")[cite: 1, 2]
     else:
-        default_phone = ""
+        default_phone = ""[cite: 1, 2]
 
     target_phone = r_col2.text_input(
         f"Recipient WhatsApp Number ({recipient_type}):",
         value=default_phone,
-        placeholder="Enter 10-digit mobile number"
-    )
+        placeholder="Enter 10-digit mobile number",
+        key="m4_target_phone_input"
+    )[cite: 1, 2]
 
-    app_base_url = "https://breast-triage-cdss.streamlit.app"
-    standalone_report_link = f"{app_base_url}/?view=report&case_id={patient['case_id']}"
+    app_base_url = "https://breast-triage-cdss.streamlit.app"[cite: 1, 2]
+    standalone_report_link = f"{app_base_url}/?view=report&case_id={patient['case_id']}"[cite: 1, 2]
 
-    if target_phone:
-        custom_wa_url = generate_pdf_whatsapp_link(recipient_type, target_phone, patient, standalone_report_link)
-        c_act1, c_act2 = st.columns([2, 1])
-        c_act1.link_button(f"📲 Send Official Slip to {recipient_type} (WhatsApp)", custom_wa_url, use_container_width=True)
-        if c_act2.button("Log Dispatch Event"):
+    if target_phone:[cite: 1, 2]
+        custom_wa_url = generate_pdf_whatsapp_link(recipient_type, target_phone, patient, standalone_report_link)[cite: 1, 2]
+        c_act1, c_act2 = st.columns([2, 1])[cite: 1, 2]
+        c_act1.link_button(f"📲 Send Official Slip to {recipient_type} (WhatsApp)", custom_wa_url, use_container_width=True)[cite: 1, 2]
+        if c_act2.button("Log Dispatch Event", key="btn_m4_log_dispatch"):[cite: 1, 2]
             patient["audit_log"].append(
                 f"[{datetime.date.today()}] Report link dispatched via WhatsApp to {recipient_type} ({target_phone})"
-            )
-            save_patient_record(patient)
-            st.success("Dispatch logged in audit trail.")
+            )[cite: 1, 2]
+            save_patient_record(patient)[cite: 1, 2]
+            st.success("Dispatch logged in audit trail.")[cite: 1, 2]
     else:
-        st.info("💡 Enter a phone number above to activate the WhatsApp dispatch link.")
+        st.info("💡 Enter a phone number above to activate the WhatsApp dispatch link.")[cite: 1, 2]
 
-    st.divider()
-    st.subheader("Formal Monochromatic Clinical Advisory Slip")
+    st.divider()[cite: 1, 2]
+    st.subheader("Formal Monochromatic Clinical Advisory Slip")[cite: 1, 2]
 
-    p = patient
+    p = patient[cite: 1, 2]
     ai_watermark = """
     <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; text-align: center; font-weight: bold; margin-bottom: 14px; font-size: 13px; border-radius: 4px;">
         ⚠️ PRELIMINARY AI-ASSISTED TRIAGE REPORT — FORMAL TELE-PATHOLOGY SIGN-OFF PENDING.
     </div>
-    """ if is_ai_mode else ""
+    """ if is_ai_mode else ""[cite: 1, 2]
 
     sign_off_html = f"""
     <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
@@ -1312,7 +1089,7 @@ elif role == "4. CDSS Triage & Advisory Report":
         <strong>Pathologist Sign-off</strong><br>
         <span style="font-size: 11px;">{p.get('pathologist','')}</span>
     </div>
-    """
+    """[cite: 1, 2]
 
     report_html = f"""
     <!DOCTYPE html>
@@ -1454,41 +1231,40 @@ elif role == "4. CDSS Triage & Advisory Report":
     </div>
     </body>
     </html>
-    """
-    components.html(report_html, height=820, scrolling=True)
-
+    """[cite: 1, 2]
+    components.html(report_html, height=820, scrolling=True)[cite: 1, 2]
 # ==========================================
 # MODULE 5: ASHA CLOSED-LOOP TRACKER
 # ==========================================
 elif role == "5. ASHA Closed-Loop Tracker":
-    st.header(f"5. ASHA Community Follow-Up Tracking: {patient['name']}")
-    st.caption("Monitor tertiary referral completion within the 21-day window to eliminate loss-to-follow-up.")
+    st.header(f"5. ASHA Community Follow-Up Tracking: {patient['name']}")[cite: 1, 2]
+    st.caption("Monitor tertiary referral completion within the 21-day window to eliminate loss-to-follow-up.")[cite: 1, 2]
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### ASHA Worker Assignment & Contact (Voice-Enabled)")
-        patient["asha_worker"] = voice_text_input("ASHA Worker Name:", patient.get("asha_worker", ""), "asha_name_trk")
-        patient["asha_contact"] = voice_text_input("ASHA Contact Number:", patient.get("asha_contact", ""), "asha_cont_trk")
-        patient["asha_area"] = voice_text_input("Assigned Area / Sector / Village:", patient.get("asha_area", ""), "asha_area_trk")
-        patient["asha_notes"] = voice_text_area("Home Visit Counseling Notes (Dictate):", patient.get("asha_notes", ""), "asha_home_notes", height=90)
+    col1, col2 = st.columns(2)[cite: 1, 2]
+    with col1:[cite: 1, 2]
+        st.markdown("#### ASHA Worker Assignment & Contact (Voice-Enabled)")[cite: 1, 2]
+        patient["asha_worker"] = voice_text_input("ASHA Worker Name:", patient.get("asha_worker", ""), "asha_name_trk")[cite: 1, 2]
+        patient["asha_contact"] = voice_text_input("ASHA Contact Number:", patient.get("asha_contact", ""), "asha_cont_trk")[cite: 1, 2]
+        patient["asha_area"] = voice_text_input("Assigned Area / Sector / Village:", patient.get("asha_area", ""), "asha_area_trk")[cite: 1, 2]
+        patient["asha_notes"] = voice_text_area("Home Visit Counseling Notes (Dictate):", patient.get("asha_notes", ""), "asha_home_notes", height=90)[cite: 1, 2]
         
-        if st.button("Update ASHA Worker Details"):
-            patient["audit_log"].append(f"[{datetime.date.today()}] ASHA details updated by worker ({patient['asha_worker']})")
-            save_patient_record(patient)
-            st.success("ASHA contact and notes updated.")
+        if st.button("Update ASHA Worker Details", key="btn_update_asha_details"):[cite: 1, 2]
+            patient["audit_log"].append(f"[{datetime.date.today()}] ASHA details updated by worker ({patient['asha_worker']})")[cite: 1, 2]
+            save_patient_record(patient)[cite: 1, 2]
+            st.success("ASHA contact and notes updated.")[cite: 1, 2]
 
-        if patient.get("asha_contact"):
+        if patient.get("asha_contact"):[cite: 1, 2]
             alert_url = generate_whatsapp_link(
                 patient["asha_contact"],
                 patient["name"],
                 patient["case_id"],
                 patient.get("yokohama", "Under Evaluation"),
                 "Complete district hospital referral visit within 21-day safety window."
-            )
-            st.link_button("📲 Send Follow-Up Reminder via WhatsApp", alert_url)
+            )[cite: 1, 2]
+            st.link_button("📲 Send Follow-Up Reminder via WhatsApp", alert_url)[cite: 1, 2]
 
-    with col2:
-        st.markdown("#### Referral Milestone Status")
+    with col2:[cite: 1, 2]
+        st.markdown("#### Referral Milestone Status")[cite: 1, 2]
         patient["tracker_status"] = st.selectbox(
             "Current Adherence Status:",
             [
@@ -1498,15 +1274,16 @@ elif role == "5. ASHA Closed-Loop Tracker":
                 "Report Received & Followed Up",
                 "Patient Hesitant / Refused (Requires ASHA Home Visit)"
             ],
-            index=0 if "Pending" in patient.get("tracker_status", "") else 1
-        )
-        st.date_input("Follow-Up Target Deadline (21 Days):", datetime.date.today() + datetime.timedelta(days=21))
-        if st.button("Save Adherence Status"):
-            save_patient_record(patient)
-            st.success("Adherence status saved.")
+            index=0 if "Pending" in patient.get("tracker_status", "") else 1,
+            key="select_tracker_status"
+        )[cite: 1, 2]
+        st.date_input("Follow-Up Target Deadline (21 Days):", datetime.date.today() + datetime.timedelta(days=21), key="date_followup_deadline")[cite: 1, 2]
+        if st.button("Save Adherence Status", key="btn_save_adherence_status"):[cite: 1, 2]
+            save_patient_record(patient)[cite: 1, 2]
+            st.success("Adherence status saved.")[cite: 1, 2]
 
-    st.divider()
-    st.markdown("#### Vernacular Patient Counseling Slip (Hindi)")
+    st.divider()[cite: 1, 2]
+    st.markdown("#### Vernacular Patient Counseling Slip (Hindi)")[cite: 1, 2]
     st.markdown(
         """
         > ### स्तन स्वास्थ्य: रोगी परामर्श पर्ची
@@ -1515,16 +1292,16 @@ elif role == "5. ASHA Closed-Loop Tracker":
         > * **घबराएं नहीं:** कोर बायोप्सी कोई बड़ा ऑपरेशन नहीं है। यह सुन्न करके की जाने वाली ओपीडी जांच है और इससे गांठ बिल्कुल नहीं फैलती।
         > * **अगला कदम:** अपनी आशा दीदी की मदद से 21 दिनों के भीतर जिला अस्पताल में जाकर यह जांच पूरी करवाएं।
         """
-    )
+    )[cite: 1, 2]
 
 # ==========================================
 # MODULE 6: PROVENANCE AUDIT TRAIL
 # ==========================================
 elif role == "6. Audit Trail & Provenance (Who Did What)":
-    st.header(f"6. Clinical Audit Trail & Provenance: Case {patient['case_id']}")
-    st.caption("Verifiable log of clinical actions, slide transfers, and assessment sign-offs.")
+    st.header(f"6. Clinical Audit Trail & Provenance: Case {patient['case_id']}")[cite: 1, 2]
+    st.caption("Verifiable log of clinical actions, slide transfers, and assessment sign-offs.")[cite: 1, 2]
 
-    st.markdown("#### Summary of Clinical Roles Involved")
+    st.markdown("#### Summary of Clinical Roles Involved")[cite: 1, 2]
     summary_data = {
         "Clinical Stage": [
             "Clinical Palpation & POCUS",
@@ -1550,10 +1327,9 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
             patient.get("pathologist", ""),
             f"{patient.get('asha_worker', '')} ({patient.get('asha_area', '')})"
         ]
-    }
-    st.table(summary_data)
+    }[cite: 1, 2]
+    st.table(summary_data)[cite: 1, 2]
 
-    st.markdown("#### Chronological Activity Log")
-    for log_item in patient.get("audit_log", []):
-        st.code(log_item, language="markdown")
-            
+    st.markdown("#### Chronological Activity Log")[cite: 1, 2]
+    for log_item in patient.get("audit_log", []):[cite: 1, 2]
+        st.code(log_item, language="markdown")[cite: 1, 2]
