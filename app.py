@@ -693,7 +693,49 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                 for uploaded in mo_new_files:
                     is_sharp, sharpness = evaluate_image_quality(uploaded)
                     if not is_sharp:
-                        blurry_files.append((uploaded.name, sha
+                        blurry_files.append((uploaded.name, sharpness))
+                    else:
+                        valid_files.append(uploaded)
+
+                if blurry_files:
+                    for fname, score in blurry_files:
+                        st.error(f"🚫 **Upload Blocked for `{fname}`** (Sharpness Score: `{score}` < `70.0`). Refocus microscope lens.")
+                else:
+                    for uploaded in valid_files:
+                        img_entry = save_slide_image(uploaded, patient["case_id"], "Medical Officer", patient["referral_doc"])
+                        patient["images"].append(img_entry)
+                    patient["audit_log"].append(f"[{datetime.date.today()}] {len(valid_files)} photo(s) uploaded by MO")
+                    save_patient_record(patient)
+                    st.toast("✅ Micrographs uploaded successfully!", icon="🩺")
+                    st.success(f"Attached {len(valid_files)} photo(s).")
+                    st.rerun()
+
+# GALLERY & DISPATCH SCOPED INSIDE TAB_EDIT (Clean Register New tab)
+        if patient.get("images"):
+            st.divider()
+            st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
+            img_cols = st.columns(min(len(patient["images"]), 4))
+            for idx, item in enumerate(patient["images"]):
+                with img_cols[idx % 4]:
+                    if "url" in item:
+                        st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                    elif "file" in item:
+                        st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                    
+                    if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
+                        delete_slide_image(item)
+                        patient["images"].pop(idx)
+                        patient["audit_log"].append(f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})")
+                        save_patient_record(patient)
+                        st.success(f"Field #{idx+1} deleted.")
+                        st.rerun()
+
+st.divider()
+        st.markdown("#### 📢 Tele-Pathology Dispatch")
+        path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
+        patient["pathologist_phone"] = path_ph
+        path_alert_url = generate_pathologist_alert_link(path_ph, patient)
+        st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
                                              # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
