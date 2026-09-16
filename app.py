@@ -275,7 +275,6 @@ role = st.sidebar.radio(
         "6. Audit Trail & Provenance (Who Did What)"
     ]
 )
-
 # ==========================================
 # MODULE 1: MEDICAL OFFICER
 # ==========================================
@@ -287,7 +286,10 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
 
     with tab_abha:
         st.subheader("Fast Demographic Intake via ABHA QR Code Data")
-        abha_raw = st.text_area("Paste Scanned ABHA Card QR Text / JSON String:", placeholder='{"hid": "91-1234-5678-9012", "name": "Kavita Devi", "gender": "F", "dob": "1981-05-12", "pincode": "248001"}')
+        abha_raw = st.text_area(
+            "Paste Scanned ABHA Card QR Text / JSON String:",
+            placeholder='{"hid": "91-1234-5678-9012", "name": "Kavita Devi", "gender": "F", "dob": "1981-05-12", "pincode": "248001"}'
+        )
         if st.button("Parse ABHA Data"):
             try:
                 data = json.loads(abha_raw)
@@ -426,8 +428,67 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
 
         if st.button("Save Clinical & Ultrasound Findings"):
             save_patient_record(patient)
-            st.success("Clinical exam data saved permanently
-            # ==========================================
+            st.success("Clinical exam data saved permanently.")
+
+        st.divider()
+        st.markdown("#### Direct Micrograph Upload with Blur Quality Gate")
+        mo_new_files = st.file_uploader(
+            "Add Slide Photos as MO (10x & 40x):",
+            type=["jpg", "png", "jpeg"],
+            accept_multiple_files=True,
+            key="mo_img_uploader"
+        )
+        if mo_new_files:
+            if st.button("Upload MO Photos to Cloud"):
+                blurry_files = []
+                valid_files = []
+
+                for uploaded in mo_new_files:
+                    is_sharp, sharpness = evaluate_image_quality(uploaded)
+                    if not is_sharp:
+                        blurry_files.append((uploaded.name, sharpness))
+                    else:
+                        valid_files.append(uploaded)
+
+                if blurry_files:
+                    for fname, score in blurry_files:
+                        st.error(
+                            f"🚫 **Upload Blocked for `{fname}`** (Sharpness Score: `{score}` < `70.0`). "
+                            f"Refocus microscope lens before uploading."
+                        )
+                    st.info("💡 Blurry photos blocked. Refocus and retry.")
+                else:
+                    for uploaded in valid_files:
+                        img_entry = save_slide_image(uploaded, patient["case_id"], "Medical Officer", patient["referral_doc"])
+                        patient["images"].append(img_entry)
+                    patient["audit_log"].append(f"[{datetime.date.today()}] {len(valid_files)} photo(s) uploaded by MO")
+                    save_patient_record(patient)
+                    st.toast("✅ Micrographs uploaded successfully!", icon="🩺")
+                    st.success(f"Attached {len(valid_files)} photo(s).")
+                    st.rerun()
+
+    # Gallery display with deletion in MO Module
+    if patient.get("images"):
+        st.divider()
+        st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
+        img_cols = st.columns(min(len(patient["images"]), 4))
+        for idx, item in enumerate(patient["images"]):
+            with img_cols[idx % 4]:
+                if "url" in item:
+                    st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                elif "file" in item:
+                    st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                
+                if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
+                    delete_slide_image(item)
+                    patient["images"].pop(idx)
+                    patient["audit_log"].append(
+                        f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})"
+                    )
+                    save_patient_record(patient)
+                    st.success(f"Field #{idx+1} deleted.")
+                    st.rerun()
+                    # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
@@ -518,7 +579,11 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                     
                     for idx, p_img in enumerate(processed_images):
                         with preview_cols[idx % 3]:
-                            st.image(p_img["annotated"], caption=f"{p_img['file'].name}: {p_img['clusters']} cluster(s)", use_container_width=True)
+                            st.image(
+                                p_img["annotated"],
+                                caption=f"{p_img['file'].name}: {p_img['clusters']} cluster(s)",
+                                use_container_width=True
+                            )
 
                     if total_detected_clusters < 6:
                         st.error(
@@ -676,7 +741,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                 save_patient_record(patient)
                 st.success("Official cytology report saved to database.")
                 st.rerun()
-            # ==========================================
+                # ==========================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
 # ==========================================
 elif role == "4. CDSS Triage & Advisory Report":
