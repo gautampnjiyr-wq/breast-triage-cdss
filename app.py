@@ -710,7 +710,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     st.success(f"Attached {len(valid_files)} photo(s).")
                     st.rerun()
 
-# GALLERY & DISPATCH SCOPED INSIDE TAB_EDIT (Clean Register New tab)
+        # Attached Micrographs Gallery (Cleanly inside tab_edit with 8 spaces)
         if patient.get("images"):
             st.divider()
             st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
@@ -730,7 +730,8 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                         st.success(f"Field #{idx+1} deleted.")
                         st.rerun()
 
-st.divider()
+        # Tele-Pathology Dispatch (Cleanly inside tab_edit with 8 spaces)
+        st.divider()
         st.markdown("#### 📢 Tele-Pathology Dispatch")
         path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
         patient["pathologist_phone"] = path_ph
