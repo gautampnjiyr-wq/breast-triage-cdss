@@ -30,242 +30,6 @@ if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
     except Exception as e:
         st.warning(f"Database connection warning: {e}")
 
-# Helper: Whisper Voice-to-Text Dictation (Zero-Cost via Groq)
-def transcribe_voice_whisper(audio_bytes):
-    if not audio_bytes:
-        return ""
-    if "GROQ_API_KEY" in st.secrets:
-        try:
-            api_key = st.secrets["GROQ_API_KEY"]
-            headers = {"Authorization": f"Bearer {api_key}"}
-            files = {"file": ("dictation.wav", audio_bytes, "audio/wav")}
-            data = {"model": "whisper-large-v3-turbo", "temperature": 0.0}
-            res = requests.post(
-                "https://api.groq.com/openai/v1/audio/transcriptions",
-                headers=headers,
-                files=files,
-                data=data,
-                timeout=15
-            )
-            if res.status_code == 200:
-                return res.json().get("text", "").strip()
-            else:
-                st.error(f"Whisper API error: {res.text}")
-        except Exception as e:
-            st.error(f"Transcription error: {e}")
-    else:
-        st.info("💡 Add `GROQ_API_KEY` to Streamlit secrets to activate live Whisper transcription.")
-    return ""
-
-# Reusable UI Component: Voice-Enabled Text Input
-def voice_text_input(label, current_val, key_prefix):
-    c_in, c_mic = st.columns([5, 1])
-    with c_mic:
-        st.write("")
-        st.write("")
-        with st.popover("🎙️", help=f"Dictate {label}"):
-            st.caption(f"Dictate: {label}")
-            aud = st.audio_input("Record", key=f"aud_{key_prefix}")
-            if aud:
-                if st.button("Apply Voice", key=f"btn_{key_prefix}"):
-                    spoken = transcribe_voice_whisper(aud.read())
-                    if spoken:
-                        st.session_state[f"val_{key_prefix}"] = spoken
-                        st.rerun()
-    with c_in:
-        default_val = st.session_state.get(f"val_{key_prefix}", current_val)
-        res = st.text_input(label, value=default_val, key=f"txt_{key_prefix}")
-        st.session_state[f"val_{key_prefix}"] = res
-        return res
-
-# Reusable UI Component: Voice-Enabled Text Area
-def voice_text_area(label, current_val, key_prefix, height=120):
-    c_in, c_mic = st.columns([5.5, 1])
-    with c_mic:
-        st.write("")
-        st.write("")
-        with st.popover("🎙️ Dictate", help=f"Dictate {label}"):
-            st.caption(f"Speak findings for: {label}")
-            aud = st.audio_input("Record audio", key=f"aud_{key_prefix}")
-            if aud:
-                if st.button("Append Transcript", key=f"btn_{key_prefix}"):
-                    spoken = transcribe_voice_whisper(aud.read())
-                    if spoken:
-                        curr = st.session_state.get(f"val_{key_prefix}", current_val)
-                        updated = f"{curr}\n• {spoken}".strip() if curr else spoken
-                        st.session_state[f"val_{key_prefix}"] = updated
-                        st.rerun()
-    with c_in:
-        default_val = st.session_state.get(f"val_{key_prefix}", current_val)
-        res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
-        st.session_state[f"val_{key_prefix}"] = res
-        return res
-
-# Helper: OpenCV Blur & Sharpness Validator
-def evaluate_image_quality(file_obj, threshold=70.0):
-    try:
-        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
-        file_obj.seek(0)
-        img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            return True, 100.0
-        laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
-        return (laplacian_var >= threshold), round(laplacian_var, 1)
-    except Exception:
-        return True, 100.0
-
-# Helper: Automated Cytology Smear Adequacy & Cluster Detection (Area-Weighted)
-def analyze_smear_adequacy(file_obj, min_cluster_area=450):
-    try:
-        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
-        file_obj.seek(0)
-        bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        if bgr is None:
-            return 0, None, False, "Corrupted Image", False
-
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        lower_purple = np.array([115, 35, 30])
-        upper_purple = np.array([165, 255, 215])
-        nuclei_mask = cv2.inRange(hsv, lower_purple, upper_purple)
-
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        cluster_mask = cv2.morphologyEx(nuclei_mask, cv2.MORPH_CLOSE, kernel)
-        clean_mask = cv2.morphologyEx(cluster_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-
-        contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        annotated_bgr = bgr.copy()
-        valid_clusters = 0
-        has_mega_sheet = False
-        total_pixels = bgr.shape[0] * bgr.shape[1]
-        min_cluster_size = max(min_cluster_area, int(total_pixels * 0.0006))
-        mega_sheet_threshold = int(total_pixels * 0.035)
-
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area >= min_cluster_size:
-                valid_clusters += 1
-                x, y, w, h = cv2.boundingRect(cnt)
-                if area >= mega_sheet_threshold:
-                    has_mega_sheet = True
-                    box_color = (0, 255, 255)
-                    label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
-                else:
-                    box_color = (0, 230, 77)
-                    label = f"Cluster #{valid_clusters}"
-
-                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), box_color, 2)
-                cv2.putText(annotated_bgr, label, (x, max(20, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)
-
-        _, buffer = cv2.imencode(".jpg", annotated_bgr)
-        annotated_bytes = buffer.tobytes()
-
-        if has_mega_sheet or valid_clusters >= 4:
-            status = "Adequate Cellularity (Diagnostic Architecture Present)"
-            is_adequate = True
-        elif 1 <= valid_clusters < 4:
-            status = "Suboptimal in this Field (Check other fields)"
-            is_adequate = False
-        else:
-            status = "Acellular Field"
-            is_adequate = False
-
-        return valid_clusters, annotated_bytes, is_adequate, status, has_mega_sheet
-    except Exception as e:
-        return 0, None, False, f"Analysis Error: {e}", False
-
-# WhatsApp Link Helpers
-def generate_whatsapp_link(phone, patient_name, case_id, risk_banner, action_directive):
-    clean_digits = "".join(filter(str.isdigit, str(phone)))
-    if len(clean_digits) == 10:
-        clean_digits = "91" + clean_digits
-    msg = (
-        f"🚨 *BREAST TRIAGE ALERT: HIGH-PRIORITY REFERRAL*\n\n"
-        f"• *Patient:* {patient_name}\n"
-        f"• *Case ID:* {case_id}\n"
-        f"• *Triage Status:* {risk_banner}\n"
-        f"• *Required Action:* {action_directive}\n"
-        f"• *Target Safety Window:* 21 Days\n\n"
-        f"Please counsel the patient at home and ensure completion of core biopsy at District Hospital."
-    )
-    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
-
-def generate_pathologist_alert_link(phone, patient):
-    clean_digits = "".join(filter(str.isdigit, str(phone)))
-    if len(clean_digits) == 10:
-        clean_digits = "91" + clean_digits
-    msg = (
-        f"🔬 *NEW CYTOLOGY TELE-REVIEW REQUEST*\n\n"
-        f"• *Patient:* {patient['name']} ({patient['age']}y)\n"
-        f"• *Case ID:* `{patient['case_id']}` | *UHID:* `{patient['uhid']}`\n"
-        f"• *Examining MO:* {patient['referral_doc']}\n"
-        f"• *Palpation:* {patient['cbe_mass']}\n"
-        f"• *Micrographs:* {len(patient.get('images', []))} attached\n"
-        f"Please review slide images and submit tele-cytology sign-off."
-    )
-    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
-
-def generate_mo_signoff_alert_link(phone, patient):
-    clean_digits = "".join(filter(str.isdigit, str(phone)))
-    if len(clean_digits) == 10:
-        clean_digits = "91" + clean_digits
-    msg = (
-        f"✅ *CYTOLOGY REPORT SIGNED OFF & FINALIZED*\n\n"
-        f"• *Patient:* {patient['name']} (Case ID: `{patient['case_id']}`)\n"
-        f"• *Evaluating Pathologist:* {patient.get('pathologist', '')}\n"
-        f"• *IAC Yokohama Category:* {patient.get('yokohama', '')}\n"
-        f"• *Notes:* {patient.get('path_notes', 'N/A')}\n\n"
-        f"Proceed to Module 4 to view CDSS Concordance Triage and print advisory report."
-    )
-    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
-
-def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_pdf_url):
-    clean_digits = "".join(filter(str.isdigit, str(target_phone)))
-    if len(clean_digits) == 10:
-        clean_digits = "91" + clean_digits
-
-    case_id = patient.get("case_id", "")
-    p_name = patient.get("name", "")
-    yokohama = patient.get("yokohama", "Under Evaluation")
-
-    if recipient_type == "Patient / Family":
-        msg = (
-            f"नमस्ते {p_name} जी,\n\n"
-            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है।\n"
-            f"• *केस आईडी:* `{case_id}`\n"
-            f"• *जांच केंद्र:* {patient.get('referral_doc', 'Primary Health Centre')}\n\n"
-            f"📄 *अपनी आधिकारिक रिपोर्ट देखें / डाउनलोड करें:* {report_pdf_url}\n\n"
-            f"कृपया यह रिपोर्ट अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं।"
-        )
-    elif recipient_type == "Consulting Pathologist":
-        msg = (
-            f"🔬 *FINALIZED CYTOLOGY & TRIAGE ADVISORY ARCHIVE*\n\n"
-            f"• *Patient:* {p_name} ({patient.get('age', '')}y, F)\n"
-            f"• *Case ID:* `{case_id}` | *UHID:* `{patient.get('uhid', '')}`\n"
-            f"• *Yokohama Category:* {yokohama}\n"
-            f"• *Signed By:* {patient.get('pathologist', 'Pathologist')}\n\n"
-            f"📥 *Direct Digital Slip Archive:* {report_pdf_url}"
-        )
-    elif recipient_type == "Examining Medical Officer (MO)":
-        msg = (
-            f"🩺 *BEDSIDE TRIAGE ADVISORY & CONCORDANCE SUMMARY*\n\n"
-            f"• *Patient:* {p_name} | *Case ID:* `{case_id}`\n"
-            f"• *Examining MO:* {patient.get('referral_doc', '')}\n"
-            f"• *IAC Yokohama Result:* {yokohama}\n"
-            f"• *Action Directive:* Core Biopsy referral status enclosed in advisory.\n\n"
-            f"📄 *View/Print Signed PDF Slip:* {report_pdf_url}"
-        )
-    else:
-        msg = (
-            f"📋 *BREAST HEALTH TRIAGE RECORD*\n\n"
-            f"• *Patient:* {p_name} (Case ID: `{case_id}`)\n"
-            f"• *Status:* {yokohama}\n"
-            f"• *Assigned ASHA:* {patient.get('asha_worker', 'N/A')}\n\n"
-            f"📄 *Digital Report Link:* {report_pdf_url}"
-        )
-
-    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
-
 # Database Fetch & Persistence Helpers
 def fetch_patient_registry():
     if HAS_SUPABASE:
@@ -331,81 +95,314 @@ def save_patient_record(patient_dict):
             payload = patient_dict.copy()
             if isinstance(payload.get("date_exam"), (datetime.date, datetime.datetime)):
                 payload["date_exam"] = payload["date_exam"].isoformat()
+            
+            # Safe upsert
             supabase.table("patients").upsert(payload).execute()
         except Exception as e:
-            st.error(f"Error saving to cloud database: {e}")
+            # Fallback if specific optional text columns are missing in DB schema
+            err_msg = str(e)
+            if "cbe_notes" in err_msg or "tech_notes" in err_msg or "asha_notes" in err_msg:
+                try:
+                    safe_payload = payload.copy()
+                    safe_payload.pop("cbe_notes", None)
+                    safe_payload.pop("tech_notes", None)
+                    safe_payload.pop("asha_notes", None)
+                    safe_payload.pop("mo_contact", None)
+                    safe_payload.pop("pathologist_phone", None)
+                    supabase.table("patients").upsert(safe_payload).execute()
+                except Exception:
+                    st.error(f"Error saving to cloud database: {e}")
+            else:
+                st.error(f"Error saving to cloud database: {e}")
     st.session_state.patients[patient_dict["case_id"]] = patient_dict
-
-def save_slide_image(file_obj, case_id, role, uploader_name):
-    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    if HAS_SUPABASE:
-        try:
-            filename = f"{case_id}_{uuid.uuid4().hex[:6]}.jpg"
-            file_bytes = file_obj.getvalue()
-            supabase.storage.from_("slide-micrographs").upload(
-                path=filename,
-                file=file_bytes,
-                file_options={"content-type": file_obj.type or "image/jpeg"}
-            )
-            image_url = supabase.storage.from_("slide-micrographs").get_public_url(filename)
-            return {"url": image_url, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
-        except Exception as e:
-            st.error(f"Cloud image upload error: {e}")
-    return {"file": file_obj, "role": role, "uploader": uploader_name, "timestamp": timestamp_str}
-
-def delete_slide_image(image_item):
-    if HAS_SUPABASE and "url" in image_item:
-        try:
-            filename = image_item["url"].split("/")[-1]
-            supabase.storage.from_("slide-micrographs").remove([filename])
-        except Exception as e:
-            st.error(f"Cloud storage deletion error: {e}")
 
 # Initial Sync
 st.session_state.patients = fetch_patient_registry()
-if "active_case_id" not in st.session_state or st.session_state.active_case_id not in st.session_state.patients:
-    st.session_state.active_case_id = list(st.session_state.patients.keys())[0]
 
-# --- SIDEBAR NAVIGATION ---
-st.sidebar.title("🩺 Breast Triage CDSS")
-st.sidebar.caption("Point-of-Care Triple Assessment + Whisper AI")
+# =========================================================================
+# STANDALONE PATIENT REPORT PORTAL (INTERCEPT VIA ?view=report)
+# =========================================================================
+params = st.query_params
+if params.get("view") == "report":
+    # Hide sidebar and default Streamlit header/footer
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] { display: none !important; }
+            #MainMenu { visibility: hidden !important; }
+            header { visibility: hidden !important; }
+            footer { visibility: hidden !important; }
+            .block-container { padding: 1rem 1rem !important; max-width: 900px !important; margin: auto !important; }
+        </style>
+    """, unsafe_allow_html=True)
 
-if HAS_SUPABASE:
-    st.sidebar.success("🟢 Cloud Sync: Active (Supabase)")
-else:
-    st.sidebar.warning("🟡 Storage: RAM Session")
+    cid = params.get("case_id")
+    p = st.session_state.patients.get(cid)
+    
+    if not p:
+        st.error(f"Report not found for Case ID: `{cid}`. Please contact your Primary Health Centre.")
+        st.stop()
 
-case_options = list(st.session_state.patients.keys())
-selected_case = st.sidebar.selectbox(
-    "Active Patient Case:",
-    options=case_options,
-    index=case_options.index(st.session_state.active_case_id) if st.session_state.active_case_id in case_options else 0
-)
-st.session_state.active_case_id = selected_case
-patient = st.session_state.patients[st.session_state.active_case_id]
+    is_ai = p.get("review_mode") == "AI Provisional"
+    ai_badge = """
+    <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; text-align: center; font-weight: bold; margin-bottom: 14px; font-size: 13px; border-radius: 4px;">
+        ⚠️ PRELIMINARY AI-ASSISTED TRIAGE REPORT — FORMAL TELE-PATHOLOGY SIGN-OFF PENDING.
+    </div>
+    """ if is_ai else ""
 
-if patient.get("review_mode") == "Final Pathologist Sign-Off":
-    st.sidebar.success("● Pathologist Reviewed")
-elif patient.get("review_mode") == "AI Provisional":
-    st.sidebar.warning("⚡ AI Provisional Triage")
-else:
-    st.sidebar.info("⏳ Awaiting Cytology Review")
+    sign_html = f"""
+    <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
+        <span style="font-style: italic; color: #856404; font-size: 11px;">[AI Provisional]</span><br>
+        <div style="border-bottom: 1px solid #111; margin: 8px 15px 4px 15px;"></div>
+        <strong>AI Cytology Screener</strong>
+    </div>
+    """ if is_ai else f"""
+    <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
+        <div style="border-bottom: 1px solid #111; margin: 18px 15px 4px 15px;"></div>
+        <strong>Pathologist Sign-off</strong><br>
+        <span style="font-size: 11px;">{p.get('pathologist','')}</span>
+    </div>
+    """
 
-st.sidebar.markdown(f"**Patient:** {patient['name']}  \n**UHID:** `{patient['uhid']}`")
-st.sidebar.divider()
+    standalone_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 10px; background: #fafafa; }}
+        .slip-card {{ border: 2px solid #222; padding: 20px; background-color: #ffffff; max-width: 800px; margin: auto; line-height: 1.45; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,0.06); }}
+        .header {{ text-align: center; border-bottom: 2px solid #222; padding-bottom: 10px; margin-bottom: 14px; }}
+        .header h2 {{ margin: 0; font-size: 18px; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .demo-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px 12px; font-size: 13px; margin-bottom: 14px; background: #fbfbfb; padding: 10px; border-radius: 4px; }}
+        .section-box {{ border-top: 1px solid #888; padding: 10px 0; font-size: 13px; }}
+        .advisory-box {{ border: 2px solid #111; padding: 12px; margin: 14px 0; background-color: #f8f9fa; font-size: 13px; }}
+        .footer-signatures {{ display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; margin-top: 20px; font-size: 12px; }}
+        .print-btn {{ display: block; width: 100%; max-width: 220px; margin: 0 auto 15px auto; padding: 10px; background-color: #0f172a; color: #ffffff; text-align: center; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; text-decoration: none; border: none; }}
+        @media print {{ .print-btn {{ display: none; }} body {{ padding: 0; background: #fff; }} .slip-card {{ border: 1px solid #000; box-shadow: none; width: 100%; }} }}
+    </style>
+    </head>
+    <body>
+    <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+    <div class="slip-card">
+        {ai_badge}
+        <div class="header">
+            <h2>PERIPHERAL BREAST TRIAGE UNIT</h2>
+            <div style="font-size: 12px; font-weight: bold; color: #444; margin-top: 3px;">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
+        </div>
+        <div class="demo-grid">
+            <div><strong>Patient:</strong> {p['name']}</div>
+            <div><strong>Age/Sex:</strong> {p['age']}y / Female</div>
+            <div><strong>Case ID:</strong> {p['case_id']}</div>
+            <div><strong>UHID:</strong> {p['uhid']}</div>
+            <div><strong>Exam Date:</strong> {p['date_exam']}</div>
+            <div><strong>Pincode:</strong> {p['pincode']}</div>
+            <div style="grid-column: 1 / -1;"><strong>Examining MO:</strong> {p['referral_doc']}</div>
+        </div>
+        <div class="section-box">
+            <strong>1. BEDSIDE CLINICAL & ULTRASOUND ASSESSMENT</strong><br>
+            • <strong>Palpation:</strong> {p['cbe_mass']} | Size: {p['cbe_size']} | Axillary Nodes: {p['cbe_nodes']}<br>
+            • <strong>Clinical Notes:</strong> {p.get('cbe_notes', 'N/A')}<br>
+            • <strong>POCUS:</strong> {'Orientation: ' + p['pocus_orientation'] + ' | Margins: ' + p['pocus_margins'] if p['pocus_available'] else 'Not Performed / Unavailable'}
+        </div>
+        <div class="section-box">
+            <strong>2. CYTOLOGY & TELE-PATHOLOGY CHAIN OF CUSTODY</strong><br>
+            • <strong>Procedure:</strong> {p['fnac_passes']}<br>
+            • <strong>Staining:</strong> {p['prep_tech']} ({p['staining']}) | Macro Adequacy: {p['macro_adequate']}<br>
+            • <strong>IAC Yokohama:</strong> <strong>{p['yokohama']}</strong><br>
+            • <strong>Observations:</strong> {p['path_notes']}<br>
+            • <strong>Reviewer:</strong> {p.get('pathologist','')}
+        </div>
+        <div class="advisory-box">
+            <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE & CONFIRMATORY ADVISORY</div>
+            <p style="margin: 6px 0 3px 0;"><strong>Findings:</strong> Category evaluated under triple assessment concordance rules.</p>
+        </div>
+        <div class="footer-signatures">
+            <div style="flex: 1.2; min-width: 180px;">
+                <strong>Community Health Follow-up:</strong><br>
+                ASHA Worker: {p.get('asha_worker', 'Unassigned')}<br>
+                Contact: {p.get('asha_contact') if p.get('asha_contact') else 'Not Provided'}<br>
+                Area: {p.get('asha_area', 'N/A')}
+            </div>
+            <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
+                <div style="border-bottom: 1px solid #111; margin: 18px 15px 4px 15px;"></div>
+                <strong>MO Sign-off</strong><br>
+                <span style="font-size: 11px;">{p['referral_doc']}</span>
+            </div>
+            {sign_html}
+        </div>
+        <div style="border-top: 2px solid #222; margin-top: 18px; padding-top: 8px; text-align: center; font-size: 11px; font-weight: bold;">
+            NOT DIAGNOSTIC. Triage Advisory for Clinical Decision Support. Proceed to Confirmatory Histopathology.
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+    components.html(standalone_html, height=850, scrolling=True)
+    st.stop()  # Halt execution so patient does not see the clinician application
 
-role = st.sidebar.radio(
-    "Workflow Cadre View:",
-    [
-        "1. Medical Officer (Exam, POCUS & Direct Upload)",
-        "2. Lab Technician (Staining, Patient Link & Upload)",
-        "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
-        "4. CDSS Triage & Advisory Report",
-        "5. ASHA Closed-Loop Tracker",
-        "6. Audit Trail & Provenance (Who Did What)"
-    ]
-        )
-# ==========================================
+# Helper: Whisper Voice-to-Text Dictation
+def transcribe_voice_whisper(audio_bytes):
+    if not audio_bytes:
+        return ""
+    if "GROQ_API_KEY" in st.secrets:
+        try:
+            api_key = st.secrets["GROQ_API_KEY"]
+            headers = {"Authorization": f"Bearer {api_key}"}
+            files = {"file": ("dictation.wav", audio_bytes, "audio/wav")}
+            data = {"model": "whisper-large-v3-turbo", "temperature": 0.0}
+            res = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=15)
+            if res.status_code == 200:
+                return res.json().get("text", "").strip()
+        except Exception as e:
+            st.error(f"Whisper transcription error: {e}")
+    return ""
+
+def voice_text_input(label, current_val, key_prefix):
+    c_in, c_mic = st.columns([5, 1])
+    with c_mic:
+        st.write("")
+        st.write("")
+        with st.popover("🎙️", help=f"Dictate {label}"):
+            st.caption(f"Dictate: {label}")
+            aud = st.audio_input("Record", key=f"aud_{key_prefix}")
+            if aud:
+                if st.button("Apply Voice", key=f"btn_{key_prefix}"):
+                    spoken = transcribe_voice_whisper(aud.read())
+                    if spoken:
+                        st.session_state[f"val_{key_prefix}"] = spoken
+                        st.rerun()
+    with c_in:
+        default_val = st.session_state.get(f"val_{key_prefix}", current_val)
+        res = st.text_input(label, value=default_val, key=f"txt_{key_prefix}")
+        st.session_state[f"val_{key_prefix}"] = res
+        return res
+
+def voice_text_area(label, current_val, key_prefix, height=120):
+    c_in, c_mic = st.columns([5.5, 1])
+    with c_mic:
+        st.write("")
+        st.write("")
+        with st.popover("🎙️ Dictate", help=f"Dictate {label}"):
+            st.caption(f"Speak findings for: {label}")
+            aud = st.audio_input("Record audio", key=f"aud_{key_prefix}")
+            if aud:
+                if st.button("Append Transcript", key=f"btn_{key_prefix}"):
+                    spoken = transcribe_voice_whisper(aud.read())
+                    if spoken:
+                        curr = st.session_state.get(f"val_{key_prefix}", current_val)
+                        updated = f"{curr}\n• {spoken}".strip() if curr else spoken
+                        st.session_state[f"val_{key_prefix}"] = updated
+                        st.rerun()
+    with c_in:
+        default_val = st.session_state.get(f"val_{key_prefix}", current_val)
+        res = st.text_area(label, value=default_val, key=f"txt_{key_prefix}", height=height)
+        st.session_state[f"val_{key_prefix}"] = res
+        return res
+
+def evaluate_image_quality(file_obj, threshold=70.0):
+    try:
+        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
+        file_obj.seek(0)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return True, 100.0
+        laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
+        return (laplacian_var >= threshold), round(laplacian_var, 1)
+    except Exception:
+        return True, 100.0
+
+def analyze_smear_adequacy(file_obj, min_cluster_area=450):
+    try:
+        file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
+        file_obj.seek(0)
+        bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if bgr is None:
+            return 0, None, False, "Corrupted Image", False
+
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        lower_purple = np.array([115, 35, 30])
+        upper_purple = np.array([165, 255, 215])
+        nuclei_mask = cv2.inRange(hsv, lower_purple, upper_purple)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        cluster_mask = cv2.morphologyEx(nuclei_mask, cv2.MORPH_CLOSE, kernel)
+        clean_mask = cv2.morphologyEx(cluster_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+
+        contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        annotated_bgr = bgr.copy()
+        valid_clusters = 0
+        has_mega_sheet = False
+        total_pixels = bgr.shape[0] * bgr.shape[1]
+        min_cluster_size = max(min_cluster_area, int(total_pixels * 0.0006))
+        mega_sheet_threshold = int(total_pixels * 0.035)
+
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area >= min_cluster_size:
+                valid_clusters += 1
+                x, y, w, h = cv2.boundingRect(cnt)
+                if area >= mega_sheet_threshold:
+                    has_mega_sheet = True
+                    box_color = (0, 255, 255)
+                    label = f"Mega-Sheet #{valid_clusters} (Diagnostic)"
+                else:
+                    box_color = (0, 230, 77)
+                    label = f"Cluster #{valid_clusters}"
+
+                cv2.rectangle(annotated_bgr, (x, y), (x + w, y + h), box_color, 2)
+                cv2.putText(annotated_bgr, label, (x, max(20, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)
+
+        _, buffer = cv2.imencode(".jpg", annotated_bgr)
+        annotated_bytes = buffer.tobytes()
+
+        if has_mega_sheet or valid_clusters >= 4:
+            status = "Adequate Cellularity (Diagnostic Architecture Present)"
+            is_adequate = True
+        elif 1 <= valid_clusters < 4:
+            status = "Suboptimal in this Field (Check other fields)"
+            is_adequate = False
+        else:
+            status = "Acellular Field"
+            is_adequate = False
+
+        return valid_clusters, annotated_bytes, is_adequate, status, has_mega_sheet
+    except Exception as e:
+        return 0, None, False, f"Analysis Error: {e}", False
+
+def generate_whatsapp_link(phone, patient_name, case_id, risk_banner, action_directive):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))
+    if len(clean_digits) == 10:
+        clean_digits = "91" + clean_digits
+    msg = (
+        f"🚨 *BREAST TRIAGE ALERT: HIGH-PRIORITY REFERRAL*\n\n"
+        f"• *Patient:* {patient_name}\n"
+        f"• *Case ID:* {case_id}\n"
+        f"• *Triage Status:* {risk_banner}\n"
+        f"• *Required Action:* {action_directive}\n"
+        f"• *Target Safety Window:* 21 Days\n\n"
+        f"Please counsel patient at home and ensure core biopsy completion at District Hospital."
+    )
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
+
+def generate_pathologist_alert_link(phone, patient):
+    clean_digits = "".join(filter(str.isdigit, str(phone)))
+    if len(clean_digits) == 10:
+        clean_digits = "91" + clean_digits
+    msg = (
+        f"🔬 *NEW CYTOLOGY TELE-REVIEW REQUEST*\n\n"
+        f"• *Patient:* {patient['name']} ({patient['age']}y)\n"
+        f"• *Case ID:* `{patient['case_id']}` | *UHID:* `{patient['uhid']}`\n"
+        f"• *Examining MO:* {patient['referral_doc']}\n"
+        f"• *Palpation:* {patient['cbe_mass']}\n"
+        f"• *Micrographs:* {len(patient.get('images', []))} attached\n"
+        f"Please review slide images and submit tele-cytology sign-off."
+    )
+    return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
+
+def generate_mo_signoff_alert_link(phone, patien
+                                   # ==========================================
 # MODULE 1: MEDICAL OFFICER
 # ==========================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
@@ -592,33 +589,33 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     st.success(f"Attached {len(valid_files)} photo(s).")
                     st.rerun()
 
-    # Gallery display with deletion in MO Module
-    if patient.get("images"):
-        st.divider()
-        st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
-        img_cols = st.columns(min(len(patient["images"]), 4))
-        for idx, item in enumerate(patient["images"]):
-            with img_cols[idx % 4]:
-                if "url" in item:
-                    st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
-                elif "file" in item:
-                    st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
-                
-                if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
-                    delete_slide_image(item)
-                    patient["images"].pop(idx)
-                    patient["audit_log"].append(f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})")
-                    save_patient_record(patient)
-                    st.success(f"Field #{idx+1} deleted.")
-                    st.rerun()
+        # GALLERY & DISPATCH SCOPED INSIDE TAB_EDIT (Fixed: Does NOT leak to Register New tab)
+        if patient.get("images"):
+            st.divider()
+            st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
+            img_cols = st.columns(min(len(patient["images"]), 4))
+            for idx, item in enumerate(patient["images"]):
+                with img_cols[idx % 4]:
+                    if "url" in item:
+                        st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                    elif "file" in item:
+                        st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                    
+                    if st.button(f"🗑️ Delete #{idx+1}", key=f"mo_del_img_{patient['case_id']}_{idx}"):
+                        delete_slide_image(item)
+                        patient["images"].pop(idx)
+                        patient["audit_log"].append(f"[{datetime.date.today()}] Slide #{idx+1} deleted by MO ({patient['referral_doc']})")
+                        save_patient_record(patient)
+                        st.success(f"Field #{idx+1} deleted.")
+                        st.rerun()
 
-    # Alert Pathologist Trigger
-    st.divider()
-    st.markdown("#### 📢 Tele-Pathology Dispatch")
-    path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
-    patient["pathologist_phone"] = path_ph
-    path_alert_url = generate_pathologist_alert_link(path_ph, patient)
-    # ==========================================
+        st.divider()
+        st.markdown("#### 📢 Tele-Pathology Dispatch")
+        path_ph = voice_text_input("Pathologist WhatsApp Contact:", patient.get("pathologist_phone", "9876543210"), "mo_pathphone")
+        patient["pathologist_phone"] = path_ph
+        path_alert_url = generate_pathologist_alert_link(path_ph, patient)
+        st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
+        # ==========================================
 # MODULE 2: LAB TECHNICIAN
 # ==========================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
@@ -762,7 +759,6 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
 
     col_view, col_report = st.columns([1.1, 1.2], gap="medium")
 
-    # COLUMN 1: SLIDE VIEWER & AI ASSISTANCE (REVIEW ONLY)
     with col_view:
         st.markdown("### 🔬 Slide Viewer & Clinical Context")
         st.markdown(f"""
@@ -839,7 +835,6 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
         with st.expander("📄 View AI Pre-Drafted Morphological Notes", expanded=False):
             st.code(draft_text, language="markdown")
 
-    # COLUMN 2: OFFICIAL PATHOLOGIST REPORTING BOX (SIGN-OFF)
     with col_report:
         st.markdown("### 📝 Official Pathologist Reporting Box")
         st.caption("Use live Whisper voice dictation (🎙️) or import the AI draft to quickly finalize findings.")
@@ -900,9 +895,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
             patient["mo_contact"] = mo_phone
             mo_notify_url = generate_mo_signoff_alert_link(mo_phone, patient)
             st.link_button("📲 Notify MO of Sign-Off via WhatsApp", mo_notify_url)
-            
-    st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
-    # ==========================================
+            # ==========================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
 # ==========================================
 elif role == "4. CDSS Triage & Advisory Report":
@@ -980,7 +973,7 @@ elif role == "4. CDSS Triage & Advisory Report":
     # --- MULTI-CADRE WHATSAPP DISPATCH CONSOLE ---
     st.divider()
     st.markdown("### 📤 Dispatch Official Report via WhatsApp")
-    st.caption("Select recipient to automatically adjust tone, language, and clinical details.")
+    st.caption("Patients receive a private link showing ONLY their signed report slip (no app interface or tools).")
 
     r_col1, r_col2 = st.columns([1.5, 2])
     recipient_type = r_col1.selectbox(
@@ -1011,11 +1004,12 @@ elif role == "4. CDSS Triage & Advisory Report":
         placeholder="Enter 10-digit mobile number"
     )
 
+    # Standalone patient report link: contains ?view=report to lock out the clinician app
     app_base_url = "https://breast-triage-cdss.streamlit.app"
-    pdf_report_link = f"{app_base_url}/?case_id={patient['case_id']}&view=report"
+    standalone_report_link = f"{app_base_url}/?view=report&case_id={patient['case_id']}"
 
     if target_phone:
-        custom_wa_url = generate_pdf_whatsapp_link(recipient_type, target_phone, patient, pdf_report_link)
+        custom_wa_url = generate_pdf_whatsapp_link(recipient_type, target_phone, patient, standalone_report_link)
         c_act1, c_act2 = st.columns([2, 1])
         c_act1.link_button(f"📲 Send Official Slip to {recipient_type} (WhatsApp)", custom_wa_url, use_container_width=True)
         if c_act2.button("Log Dispatch Event"):
