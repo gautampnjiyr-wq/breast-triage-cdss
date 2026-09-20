@@ -21,13 +21,10 @@ st.set_page_config(
 # =========================================================================
 st.markdown("""
     <style>
-        /* Global Font & Background */
         .stApp {
             background-color: #f8fafc;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
-        
-        /* Modern Card Containers */
         div.stContainer {
             background-color: #ffffff;
             border: 1px solid #e2e8f0;
@@ -36,14 +33,10 @@ st.markdown("""
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
             margin-bottom: 16px;
         }
-
-        /* Status Pills */
         .badge-success { background-color: #dcfce7; color: #166534; padding: 4px 12px; border-radius: 9999px; font-weight: 600; font-size: 11px; display: inline-block; }
         .badge-warning { background-color: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 9999px; font-weight: 600; font-size: 11px; display: inline-block; }
         .badge-danger { background-color: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 9999px; font-weight: 600; font-size: 11px; display: inline-block; }
         .badge-info { background-color: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 9999px; font-weight: 600; font-size: 11px; display: inline-block; }
-
-        /* Metric Grid Box */
         .metric-box {
             background: #f8fafc;
             border: 1px solid #f1f5f9;
@@ -51,8 +44,6 @@ st.markdown("""
             padding: 12px;
             text-align: center;
         }
-        
-        /* Hide default Streamlit anchors */
         .st-emotion-cache-16txtl3 { visibility: hidden; }
     </style>
 """, unsafe_allow_html=True)
@@ -279,8 +270,7 @@ if params.get("view") == "report":
     """
     components.html(standalone_html, height=850, scrolling=True)
     st.stop()
-
-# =========================================================================
+    # =========================================================================
 # HELPER FUNCTIONS (VOICE, CV2 ADEQUACY, WHATSAPP, STORAGE)
 # =========================================================================
 def transcribe_voice_whisper(audio_bytes):
@@ -468,11 +458,11 @@ def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_url
     if recipient_type == "Patient / Family":
         msg = (
             f"नमस्ते {p_name} जी,\n\n"
-            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है।\n"
+            f"आपकी प्राथमिक स्तन जांच (Breast Triage Advisory) रिपोर्ट तैयार है。\n"
             f"• *केस आईडी:* `{case_id}`\n"
             f"• *जांच केंद्र:* {patient.get('referral_doc', 'Primary Health Centre')}\n\n"
             f"📄 *अपनी आधिकारिक रिपोर्ट देखने के लिए यहाँ क्लिक करें:* {report_url}\n\n"
-            f"कृपया यह पर्ची अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं।"
+            f"कृपया यह पर्ची अपनी आशा दीदी ({patient.get('asha_worker', '')}) या अस्पताल के डॉक्टर को दिखाएं。"
         )
     elif recipient_type == "Consulting Pathologist":
         msg = (
@@ -527,8 +517,7 @@ def delete_slide_image(image_item):
             supabase.storage.from_("slide-micrographs").remove([filename])
         except Exception as e:
             st.error(f"Cloud storage deletion error: {e}")
-
-# =========================================================================
+            # =========================================================================
 # MODERN SIDEBAR STATE & NAVIGATION
 # =========================================================================
 if "active_case_id" not in st.session_state or st.session_state.active_case_id not in st.session_state.patients:
@@ -571,15 +560,28 @@ role = st.sidebar.radio(
         "3. Cytology Review (AI Assist & Pathologist Sign-Off)",
         "4. CDSS Triage & Advisory Report",
         "5. ASHA Closed-Loop Tracker",
-        "6. Audit Trail & Provenance (Who Did What)"
+        "6. Audit Trail & Provenance (Who Did What)",
+        "7. Advanced Batch Excel Validator & Analytics"
     ]
 )
+
 # =========================================================================
 # MODULE 1: MEDICAL OFFICER
 # =========================================================================
 if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
     st.header("1. Medical Officer: Clinical Examination & Bedside Staging")
     st.caption("All text inputs support hands-free Whisper dictation (tap 🎙️ beside any field).")
+
+    # BI-RADS Reference Matrix Expander
+    with st.expander("📖 Official BI-RADS & Ultrasound (POCUS) Correlation Reference Matrix", expanded=False):
+        st.markdown("""
+        | BI-RADS Category | Expected USG Shape / Orientation | USG Margin Integrity | Posterior Acoustic Feature | Malignancy Risk | CDSS Triage Action |
+        | :--- | :--- | :--- | :--- | :--- | :--- |
+        | **BI-RADS 2** | Wider-than-tall (Parallel) | Smooth & Well-defined | Enhancement / Neutral | **0% (Benign)** | Routine Follow-up |
+        | **BI-RADS 3** | Wider-than-tall (Parallel) | Smooth or Faint Lobulated | Neutral / Mild Enhancement | **< 2% (Probably Benign)** | Short-term 6-mo Follow-up |
+        | **BI-RADS 4 (a/b/c)** | Variable / Vertical tendency | Irregular / Microlobulated | Shadowing or Mixed | **2% – 95% (Suspicious)** | **Mandate Core-Needle Biopsy** |
+        | **BI-RADS 5** | Taller-than-wide (Vertical) | Spiculated / Highly Irregular | Prominent Shadowing | **> 95% (Malignant)** | **Mandate CNB & Urgent Referral** |
+        """)
 
     tab_edit, tab_register, tab_abha = st.tabs(["📝 View / Edit Current", "➕ Register New", "🪪 ABHA Auto-Fill"])
 
@@ -820,7 +822,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
             patient["pathologist_phone"] = path_ph
             path_alert_url = generate_pathologist_alert_link(path_ph, patient)
             st.link_button("📲 Notify Pathologist via WhatsApp", path_alert_url)
-# =========================================================================
+            # =========================================================================
 # MODULE 2: LAB TECHNICIAN
 # =========================================================================
 elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
@@ -954,7 +956,8 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
         patient["pathologist_phone"] = t_path_phone
         tech_alert_url = generate_pathologist_alert_link(t_path_phone, patient)
         st.link_button("📲 Send Case to Pathologist (WhatsApp)", tech_alert_url)
-        # =========================================================================
+
+# =========================================================================
 # MODULE 3: CYTOLOGY REVIEW
 # =========================================================================
 elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
@@ -1334,7 +1337,8 @@ elif role == "4. CDSS Triage & Advisory Report":
         </html>
         """
         components.html(report_html, height=820, scrolling=True)
-        # =========================================================================
+
+# =========================================================================
 # MODULE 5: ASHA CLOSED-LOOP TRACKER
 # =========================================================================
 elif role == "5. ASHA Closed-Loop Tracker":
@@ -1395,8 +1399,7 @@ elif role == "5. ASHA Closed-Loop Tracker":
             > * **अगला कदम:** अपनी आशा दीदी की मदद से 21 दिनों के भीतर जिला अस्पताल में जाकर यह जांच पूरी करवाएं।
             """
         )
-
-# =========================================================================
+        # =========================================================================
 # MODULE 6: PROVENANCE AUDIT TRAIL
 # =========================================================================
 elif role == "6. Audit Trail & Provenance (Who Did What)":
@@ -1436,3 +1439,100 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
         st.markdown("#### Chronological Activity Log")
         for log_item in patient.get("audit_log", []):
             st.code(log_item, language="markdown")
+
+# =========================================================================
+# MODULE 7: ADVANCED BATCH EXCEL VALIDATOR & RESEARCH ANALYTICS
+# =========================================================================
+elif role == "7. Advanced Batch Excel Validator & Analytics":
+    with st.container(border=True):
+        st.header("7. Advanced Batch Research Workbench & Excel Validator")
+        st.caption("Upload your thesis Excel dataset (e.g., Final_61_Thesis_Cases.xlsx) to batch-evaluate concordance performance, sensitivity, and specificity across all cases simultaneously.")
+
+        uploaded_thesis_file = st.file_uploader(
+            "Upload Thesis Excel / CSV Dataset:",
+            type=["xlsx", "xls", "csv"],
+            key="batch_excel_uploader"
+        )
+
+        if uploaded_thesis_file is not None:
+            try:
+                if uploaded_thesis_file.name.endswith(".csv"):
+                    batch_df = pd.read_csv(uploaded_thesis_file)
+                else:
+                    xl = pd.ExcelFile(uploaded_thesis_file)
+                    sheet_to_load = xl.sheet_names[0]
+                    if len(xl.sheet_names) > 1:
+                        sheet_to_load = st.selectbox("Select Excel Sheet:", xl.sheet_names)
+                    batch_df = pd.read_excel(uploaded_thesis_file, sheet_name=sheet_to_load)
+
+                st.success(f"Successfully loaded `{uploaded_thesis_file.name}` ({len(batch_df)} rows detected).")
+                
+                with st.expander("🔍 Preview Raw Dataset Columns & Rows", expanded=False):
+                    st.dataframe(batch_df.head(10))
+
+                if st.button("🚀 Run Batch CDSS Evaluation & Compute Metrics", type="primary"):
+                    def evaluate_batch_row(row):
+                        birads = str(row.get("Radio / BI-RADS", "")).upper().strip()
+                        cyto = str(row.get("Cyto / FNAC", "")).lower().strip()
+                        histo = str(row.get("Histo", "")).lower().strip()
+                        
+                        high_radio = any(b in birads for b in ["IV", "V", "4", "VI"])
+                        is_malignant_cyto = "carcinoma" in cyto or "malignant" in cyto or "suspicious" in cyto
+                        is_benign_cyto = "benign" in cyto or "fibroadenoma" in cyto or "cyst" in cyto or "galactocele" in cyto or "fat necrosis" in cyto
+                        
+                        if high_radio and is_benign_cyto:
+                            rec = "Mandate CNB (Critical Discordance)"
+                            mandate = True
+                        elif high_radio or is_malignant_cyto:
+                            rec = "Mandate CNB / Referral"
+                            mandate = True
+                        else:
+                            rec = "Routine Follow-up (Benign)"
+                            mandate = False
+                            
+                        is_mal_histo = "carcinoma" in histo or "ca" in histo or "malignant" in histo
+                        return rec, mandate, is_mal_histo
+
+                    eval_results = batch_df.apply(evaluate_batch_row, axis=1)
+                    batch_df["CDSS_Recommendation"] = [r[0] for r in eval_results]
+                    batch_df["CDSS_Mandated_Biopsy"] = [r[1] for r in eval_results]
+                    batch_df["Histology_Malignant"] = [r[2] for r in eval_results]
+
+                    tp = np.sum(batch_df["CDSS_Mandated_Biopsy"] & batch_df["Histology_Malignant"])
+                    fn = np.sum(~batch_df["CDSS_Mandated_Biopsy"] & batch_df["Histology_Malignant"])
+                    tn = np.sum(~batch_df["CDSS_Mandated_Biopsy"] & ~batch_df["Histology_Malignant"])
+                    fp = np.sum(batch_df["CDSS_Mandated_Biopsy"] & ~batch_df["Histology_Malignant"])
+
+                    sens = tp / (tp + fn) if (tp + fn) > 0 else 0
+                    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+
+                    st.markdown("### 📊 Batch Evaluation Results Summary")
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Total Cases", len(batch_df))
+                    m2.metric("True Positives (Cancers Caught)", tp)
+                    m3.metric("False Negatives (Missed)", fn)
+                    m4.metric("Sensitivity (Recall)", f"{sens * 100:.1f}%")
+
+                    m5, m6 = st.columns(2)
+                    m5.metric("Specificity", f"{spec * 100:.1f}%")
+                    m6.metric("False Positives (Over-referral)", fp)
+
+                    st.divider()
+                    st.markdown("#### 📋 Evaluated Case-by-Case Breakdown Table")
+                    st.dataframe(batch_df[["Case ID", "Patient Name", "Radio / BI-RADS", "Cyto / FNAC", "CDSS_Recommendation", "Histo"]], use_container_width=True)
+
+                    output_filename = "Evaluated_Batch_Research_Report.xlsx"
+                    batch_df.to_excel(output_filename, index=False)
+                    
+                    with open(output_filename, "rb") as f:
+                        st.download_button(
+                            label="📥 Download Full Evaluated Excel Report",
+                            data=f,
+                            file_name=output_filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+
+            except Exception as e:
+                st.error(f"Error processing uploaded file: {e}")
+        else:
+            st.info("💡 Upload your thesis Excel file above to instantly run batch statistics.")
