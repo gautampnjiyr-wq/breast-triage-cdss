@@ -3,3 +3,4 @@ supabase
 pillow
 opencv-python-headless
 numpy
+openpyxl
