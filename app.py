@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 from PIL import Image
 import numpy as np
 import cv2
+import pandas as pd
 
 st.set_page_config(
     page_title="Breast Triage CDSS",
