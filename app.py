@@ -583,7 +583,6 @@ role = st.sidebar.radio(
         "7. Advanced Batch Excel Validator & Analytics"
     ]
 )
-
 # =========================================================================
 # MODULE 1: MEDICAL OFFICER
 # =========================================================================
@@ -791,8 +790,14 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                     "BI-RADS 4c: High Suspicion for Malignancy",
                     "BI-RADS 5: Highly Suggestive of Malignancy"
                 ]
-                curr_birads = patient.get("birads_score", birads_options[1])
-                birads_idx = next((i for i, b in enumerate(birads_options) if curr_birads[:10] in b), 1)
+                
+                curr_birads = str(patient.get("birads_score") or "BI-RADS 2: Benign")
+                birads_idx = 1
+                for i, b in enumerate(birads_options):
+                    if curr_birads.strip().lower() in b.lower() or b.lower().startswith(curr_birads.strip().lower()[:5]):
+                        birads_idx = i
+                        break
+                        
                 patient["birads_score"] = st.selectbox("ACR BI-RADS Assessment Score:", options=birads_options, index=birads_idx)
 
                 patient["pocus_available"] = st.checkbox("Ultrasound Available at Clinic?", value=patient.get("pocus_available", False))
