@@ -111,7 +111,8 @@ def fetch_patient_registry():
                 "images": [],
                 "review_mode": "Final Pathologist Sign-Off",
                 "pathologist": "Dr. Priya Sharma, MD Pathology",
-                "yokohama": "Category 5: Malignant (Risk of Malignancy: >97%)",
+                "yokohama": "Category 5: Malignant",
+                "yokohama_rom": ">97% Risk of Malignancy",
                 "robinson_dissociation": "Mostly isolated cells (3)",
                 "robinson_size": ">4× lymphocyte (3)",
                 "robinson_uniformity": "Marked pleomorphism (3)",
@@ -120,6 +121,11 @@ def fetch_patient_registry():
                 "robinson_chromatin": "Coarse / clumped (3)",
                 "robinson_score": 18,
                 "robinson_grade": "Grade III (High Grade)",
+                "nottingham_tubules": "Little or none (<10%) (3)",
+                "nottingham_pleomorphism": "Marked pleomorphism (3)",
+                "nottingham_mitoses": ">12 mitoses/10 HPF (3)",
+                "nottingham_score": 9,
+                "nottingham_grade": "Grade III (Poorly Differentiated)",
                 "path_notes": "Marked dyscohesion, pleomorphism, and prominent nucleoli.",
                 "asha_worker": "Meena Devi",
                 "asha_contact": "9876543210",
@@ -144,9 +150,11 @@ def save_patient_record(patient_dict):
                 extended_cols = [
                     "patient_contact", "mo_contact", "pathologist_phone", 
                     "cbe_notes", "tech_notes", "asha_notes", "asha_contact", "asha_area",
-                    "birads_score", "robinson_dissociation", "robinson_size", 
+                    "birads_score", "yokohama_rom", "robinson_dissociation", "robinson_size", 
                     "robinson_uniformity", "robinson_nucleoli", "robinson_margin", 
-                    "robinson_chromatin", "robinson_score", "robinson_grade"
+                    "robinson_chromatin", "robinson_score", "robinson_grade",
+                    "nottingham_tubules", "nottingham_pleomorphism", "nottingham_mitoses",
+                    "nottingham_score", "nottingham_grade"
                 ]
                 for col in extended_cols:
                     safe_payload.pop(col, None)
@@ -245,17 +253,13 @@ if params.get("view") == "report":
             • <strong>POCUS:</strong> {'Orientation: ' + p['pocus_orientation'] + ' | Margins: ' + p['pocus_margins'] if p['pocus_available'] else 'Not Performed / Unavailable'}
         </div>
         <div class="section-box">
-            <strong>2. CYTOLOGY, ROBINSON GRADING & TELE-PATHOLOGY</strong><br>
+            <strong>2. CYTOLOGY, ROBINSON & NOTTINGHAM HISTOPATHOLOGY</strong><br>
             • <strong>Procedure:</strong> {p['fnac_passes']}<br>
             • <strong>Staining:</strong> {p['prep_tech']} ({p['staining']}) | Macro Adequacy: {p['macro_adequate']}<br>
-            • <strong>IAC Yokohama:</strong> <strong>{p['yokohama']}</strong><br>
+            • <strong>IAC Yokohama Category:</strong> <strong>{p['yokohama']}</strong><br>
+            • <strong>Estimated Risk of Malignancy (ROM):</strong> <span style="color: #991b1b; font-weight: bold;">{p.get('yokohama_rom', 'Derived from Category')}</span><br>
             • <strong>Robinson Cytological Grade:</strong> <span style="font-weight:bold;">{p.get('robinson_grade', 'N/A')} (Score: {p.get('robinson_score', 'N/A')}/18)</span><br>
-            &nbsp;&nbsp;&nbsp;&nbsp;- Dissociation: {p.get('robinson_dissociation','')}<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;- Cell Size: {p.get('robinson_size','')}<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;- Uniformity: {p.get('robinson_uniformity','')}<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;- Nucleoli: {p.get('robinson_nucleoli','')}<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;- Nuclear Margin: {p.get('robinson_margin','')}<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;- Chromatin: {p.get('robinson_chromatin','')}<br>
+            • <strong>Nottingham Histological Grade:</strong> <span style="font-weight:bold;">{p.get('nottingham_grade', 'N/A')} (Score: {p.get('nottingham_score', 'N/A')}/9)</span><br>
             • <strong>Observations:</strong> {p['path_notes']}<br>
             • <strong>Reviewer:</strong> {p.get('pathologist','')}
         </div>
@@ -456,9 +460,9 @@ def generate_mo_signoff_alert_link(phone, patient):
         f"✅ *CYTOLOGY REPORT SIGNED OFF & FINALIZED*\n\n"
         f"• *Patient:* {patient['name']} (Case ID: `{patient['case_id']}`)\n"
         f"• *Evaluating Pathologist:* {patient.get('pathologist', '')}\n"
-        f"• *IAC Yokohama Category:* {patient.get('yokohama', '')}\n"
+        f"• *IAC Yokohama:* {patient.get('yokohama', '')}\n"
         f"• *Robinson Grade:* {patient.get('robinson_grade', 'N/A')}\n"
-        f"• *Notes:* {patient.get('path_notes', 'N/A')}\n\n"
+        f"• *Nottingham Grade:* {patient.get('nottingham_grade', 'N/A')}\n\n"
         f"Proceed to Module 4 to view CDSS Concordance Triage and print advisory report."
     )
     return f"https://wa.me/{clean_digits}?text={urllib.parse.quote(msg)}"
@@ -488,7 +492,7 @@ def generate_pdf_whatsapp_link(recipient_type, target_phone, patient, report_url
             f"• *Case ID:* `{case_id}` | *UHID:* `{patient.get('uhid', '')}`\n"
             f"• *Yokohama Category:* {yokohama}\n"
             f"• *Robinson Grade:* {patient.get('robinson_grade', 'N/A')}\n"
-            f"• *Signed By:* {patient.get('pathologist', 'Pathologist')}\n\n"
+            f"• *Nottingham Grade:* {patient.get('nottingham_grade', 'N/A')}\n\n"
             f"📥 *Digital Slip Link:* {report_url}"
         )
     elif recipient_type == "Examining Medical Officer (MO)":
@@ -583,6 +587,7 @@ role = st.sidebar.radio(
         "7. Advanced Batch Excel Validator & Analytics"
     ]
 )
+
 # =========================================================================
 # MODULE 1: MEDICAL OFFICER
 # =========================================================================
@@ -712,7 +717,8 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                         "images": [],
                         "review_mode": "Awaiting Review",
                         "pathologist": "Pending Review",
-                        "yokohama": "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
+                        "yokohama": "Category 1: Insufficient / Inadequate",
+                        "yokohama_rom": "10–25% Risk of Malignancy",
                         "robinson_dissociation": "Mostly cohesive clusters (1)",
                         "robinson_size": "1–2× lymphocyte (1)",
                         "robinson_uniformity": "Uniform / monomorphic (1)",
@@ -721,6 +727,11 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                         "robinson_chromatin": "Fine (1)",
                         "robinson_score": 6,
                         "robinson_grade": "Grade I (Low Grade)",
+                        "nottingham_tubules": "Complete tubular formation (>75%) (1)",
+                        "nottingham_pleomorphism": "Small, uniform cells (1)",
+                        "nottingham_mitoses": "Up to 7 mitoses/10 HPF (1)",
+                        "nottingham_score": 3,
+                        "nottingham_grade": "Grade I (Well Differentiated)",
                         "path_notes": "Awaiting slide image review.",
                         "asha_worker": new_asha_name,
                         "asha_contact": new_asha_phone,
@@ -826,6 +837,7 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
 
         with st.container(border=True):
             st.markdown("#### Direct Clinical Image Upload with Blur Quality Gate")
+            img_role_tag = st.selectbox("Image Classification Type:", ["Clinical Image", "Histopathology Slide", "Cytology Micrograph"], key="mo_img_role")
             mo_new_files = st.file_uploader(
                 "Add Clinical Photos / Gross Examination / Scans as MO:",
                 type=["jpg", "png", "jpeg"],
@@ -847,12 +859,12 @@ if role == "1. Medical Officer (Exam, POCUS & Direct Upload)":
                             st.error(f"🚫 **Upload Blocked for `{fname}`** (Sharpness Score: `{score}` < `70.0`).")
                     else:
                         for uploaded in valid_files:
-                            img_entry = save_slide_image(uploaded, patient["case_id"], "Clinical Image", patient["referral_doc"])
+                            img_entry = save_slide_image(uploaded, patient["case_id"], img_role_tag, patient["referral_doc"])
                             patient["images"].append(img_entry)
-                        patient["audit_log"].append(f"[{datetime.date.today()}] {len(valid_files)} clinical photo(s) uploaded by MO")
+                        patient["audit_log"].append(f"[{datetime.date.today()}] {len(valid_files)} {img_role_tag}(s) uploaded by MO")
                         save_patient_record(patient)
-                        st.toast("✅ Clinical images uploaded successfully!", icon="🩺")
-                        st.success(f"Attached {len(valid_files)} clinical photo(s).")
+                        st.toast("✅ Visual records uploaded successfully!", icon="🩺")
+                        st.success(f"Attached {len(valid_files)} record(s).")
                         st.rerun()
 
             if patient.get("images"):
@@ -932,7 +944,8 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                 st.success("Staining details updated.")
 
         with col2:
-            st.markdown("#### Smartphone Micrograph Upload & AI Adequacy Gate")
+            st.markdown("#### Micrograph Upload & AI Adequacy Gate")
+            tech_img_role = st.selectbox("Image Role:", ["Cytology Micrograph", "Histopathology Slide"], key="tech_img_role_sel")
             tech_new_files = st.file_uploader(
                 "Attach Slide Photos as Technician:",
                 type=["jpg", "png", "jpeg"],
@@ -983,31 +996,32 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
                             st.warning(f"⚠️ **LOW CELLULARITY ({total_detected_clusters} clusters):** If other fields have cells, upload 2–3 more fields before patient leaves.")
 
                         for p_img in processed_images:
-                            img_entry = save_slide_image(p_img["file"], patient["case_id"], "Lab Technician", patient["prep_tech"])
+                            img_entry = save_slide_image(p_img["file"], patient["case_id"], tech_img_role, patient["prep_tech"])
                             patient["images"].append(img_entry)
 
                         patient["macro_adequate"] = "Yes" if smear_pass else "Suboptimal (Low Cellularity on Tele-Screen)"
-                        patient["audit_log"].append(f"[{datetime.date.today()}] {len(processed_images)} photo(s) analyzed: {total_detected_clusters} cluster(s).")
+                        patient["audit_log"].append(f"[{datetime.date.today()}] {len(processed_images)} {tech_img_role}(s) uploaded.")
                         save_patient_record(patient)
                         st.toast("Micrographs uploaded and indexed.", icon="🔬")
 
     if patient.get("images"):
         with st.container(border=True):
-            st.markdown(f"#### Attached Micrographs ({len(patient['images'])} total)")
+            st.markdown(f"#### Attached Visual Records ({len(patient['images'])} total)")
             img_cols = st.columns(min(len(patient["images"]), 4))
             for idx, item in enumerate(patient["images"]):
                 with img_cols[idx % 4]:
+                    role_str = item.get('role', 'Micrograph')
                     if "url" in item:
-                        st.image(item["url"], caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                        st.image(item["url"], caption=f"Field {idx+1} [{role_str}]", use_container_width=True)
                     elif "file" in item:
-                        st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{item['role']}]", use_container_width=True)
+                        st.image(Image.open(item["file"]), caption=f"Field {idx+1} [{role_str}]", use_container_width=True)
 
                     if st.button(f"🗑️ Delete #{idx+1}", key=f"tech_del_img_{patient['case_id']}_{idx}"):
                         delete_slide_image(item)
                         patient["images"].pop(idx)
-                        patient["audit_log"].append(f"[{datetime.date.today()}] Slide #{idx+1} deleted by Tech ({patient['prep_tech']})")
+                        patient["audit_log"].append(f"[{datetime.date.today()}] Record #{idx+1} deleted by Tech")
                         save_patient_record(patient)
-                        st.success(f"Field #{idx+1} deleted.")
+                        st.success(f"Record #{idx+1} deleted.")
                         st.rerun()
 
     with st.container(border=True):
@@ -1018,11 +1032,11 @@ elif role == "2. Lab Technician (Staining, Patient Link & Upload)":
         st.link_button("📲 Send Case to Pathologist (WhatsApp)", tech_alert_url)
 
 # =========================================================================
-# MODULE 3: CYTOLOGY REVIEW WITH ROBINSON GRADING
+# MODULE 3: CYTOLOGY REVIEW & NOTTINGHAM HISTOPATHOLOGY GRADING
 # =========================================================================
 elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
     st.header("3. Cytology Evaluation & Tele-Reporting Console")
-    st.caption("AI-assisted pattern screening on the left; official pathologist reporting with Robinson Cytological Grading on the right.")
+    st.caption("AI screening on the left; official pathologist reporting with Robinson & Nottingham grading on the right.")
 
     st.subheader(f"Case Under Evaluation: {patient['name']} | Case ID: `{patient['case_id']}`")
 
@@ -1067,39 +1081,23 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
             )
 
             if "Fibroadenoma" in ai_detected_pattern:
-                suggested_cat = "Category 2: Benign Cells (Risk of Malignancy: <3%)"
-                draft_text = (
-                    "• Specimen & Stain: Breast FNAC; Romanowsky / Diff-Quik.\n"
-                    "• Cellularity & Architecture: High cellularity. Cohesive, monolayered, branching sheets of benign ductal epithelial cells in characteristic 'antler-like' configurations.\n"
-                    "• Nuclear Morphology: Small, round, monomorphic nuclei with regular spacing and delicate chromatin. No marked pleomorphism or hyperchromasia.\n"
-                    "• Background & Stroma: Abundant naked oval-to-elongated bipolar (myoepithelial) nuclei scattered across proteinaceous background with fragments of fibromyxoid stroma.\n"
-                    "• Impression: Consistent with Benign Fibroepithelial Lesion (Favors Fibroadenoma)."
-                )
+                suggested_cat = "Category 2: Benign Cells"
+                suggested_rom = "<3% Risk of Malignancy"
+                draft_text = "• Specimen & Stain: Breast FNAC; Romanowsky / Diff-Quik.\n• Cellularity & Architecture: High cellularity. Cohesive, monolayered, branching sheets of benign ductal epithelial cells in characteristic 'antler-like' configurations.\n• Impression: Consistent with Benign Fibroepithelial Lesion (Favors Fibroadenoma)."
             elif "Malignancy" in ai_detected_pattern:
-                suggested_cat = "Category 5: Malignant (Risk of Malignancy: >97%)"
-                draft_text = (
-                    "• Specimen & Stain: Breast FNAC; Romanowsky / Diff-Quik.\n"
-                    "• Cellularity & Architecture: Highly cellular smear dominated by dyscohesive, isolated intact atypical epithelial cells and irregular 3D clusters.\n"
-                    "• Nuclear Morphology: Marked pleomorphism, coarsely clumped chromatin, prominent nucleoli, and elevated N:C ratios.\n"
-                    "• Background & Stroma: Necrotic tumor background (tumor diathesis) with an absence of bare bipolar nuclei.\n"
-                    "• Impression: Cytologically malignant; features diagnostic of Carcinoma."
-                )
+                suggested_cat = "Category 5: Malignant"
+                suggested_rom = ">97% Risk of Malignancy"
+                draft_text = "• Specimen & Stain: Breast FNAC; Romanowsky / Diff-Quik.\n• Cellularity & Architecture: Highly cellular smear dominated by dyscohesive, isolated intact atypical epithelial cells and irregular 3D clusters.\n• Impression: Cytologically malignant; features diagnostic of Carcinoma."
             elif "Atypical" in ai_detected_pattern:
-                suggested_cat = "Category 3: Atypical (Risk of Malignancy: 15–50%)"
-                draft_text = (
-                    "• Specimen & Stain: Breast FNAC; Romanowsky / Diff-Quik.\n"
-                    "• Architecture: Crowded 3-dimensional groups with focal loss of cohesion.\n"
-                    "• Nuclear Features: Mild nuclear enlargement and chromatin clumping without overt malignant features.\n"
-                    "• Impression: Atypical features present; histopathologic correlation indicated."
-                )
+                suggested_cat = "Category 3: Atypical"
+                suggested_rom = "15–50% Risk of Malignancy"
+                draft_text = "• Specimen & Stain: Breast FNAC; Romanowsky / Diff-Quik.\n• Architecture: Crowded 3-dimensional groups with focal loss of cohesion.\n• Impression: Atypical features present; histopathologic correlation indicated."
             else:
-                suggested_cat = "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)"
-                draft_text = (
-                    "• Smear hypocellular, containing predominantly blood and proteinaceous debris.\n"
-                    "• Does not meet the IAC Yokohama threshold of 6 cohesive clusters of ductal epithelium."
-                )
+                suggested_cat = "Category 1: Insufficient / Inadequate"
+                suggested_rom = "10–25% Risk of Malignancy"
+                draft_text = "• Smear hypocellular, containing predominantly blood and proteinaceous debris."
 
-            st.markdown(f"> **AI Suggested:** `{suggested_cat}`")
+            st.markdown(f"> **AI Suggested:** `{suggested_cat}` ({suggested_rom})")
             with st.expander("📄 View AI Pre-Drafted Morphological Notes", expanded=False):
                 st.code(draft_text, language="markdown")
 
@@ -1111,6 +1109,7 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
             if st.button("📥 Import AI Draft into Reporting Box", key="btn_import_ai_draft"):
                 patient["path_notes"] = draft_text
                 patient["yokohama"] = suggested_cat
+                patient["yokohama_rom"] = suggested_rom
                 st.session_state["val_path_obs"] = draft_text
                 st.toast("AI draft copied to your reporting box!", icon="📋")
                 st.rerun()
@@ -1121,22 +1120,25 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
                 "path_name_input"
             )
 
-            yokohama_categories = [
-                "Category 1: Insufficient / Inadequate (Risk of Malignancy: 10–25%)",
-                "Category 2: Benign Cells (Risk of Malignancy: <3%)",
-                "Category 3: Atypical (Risk of Malignancy: 15–50%)",
-                "Category 4: Suspicious for Malignancy (Risk of Malignancy: 60–85%)",
-                "Category 5: Malignant (Risk of Malignancy: >97%)"
+            yokohama_options = [
+                ("Category 1: Insufficient / Inadequate", "10–25% Risk of Malignancy"),
+                ("Category 2: Benign Cells", "<3% Risk of Malignancy"),
+                ("Category 3: Atypical", "15–50% Risk of Malignancy"),
+                ("Category 4: Suspicious for Malignancy", "60–85% Risk of Malignancy"),
+                ("Category 5: Malignant", ">97% Risk of Malignancy")
             ]
-            curr_yok = patient.get("yokohama", yokohama_categories[1])
-            matched_idx = next((i for i, cat in enumerate(yokohama_categories) if curr_yok[:10] in cat), 1)
+            
+            curr_yok = patient.get("yokohama", yokohama_options[1][0])
+            yok_idx = next((i for i, opt in enumerate(yokohama_options) if opt[0][:10] in curr_yok), 1)
 
-            patient["yokohama"] = st.selectbox("Final IAC Yokohama Diagnostic Category:", options=yokohama_categories, index=matched_idx, key="select_yokohama_cat")
+            selected_yok = st.selectbox("Final IAC Yokohama Diagnostic Category:", options=[opt[0] for opt in yok_options], index=yok_idx)
+            patient["yokohama"] = selected_yok
+            patient["yokohama_rom"] = next(opt[1] for opt in yok_options if opt[0] == selected_yok)
+
+            st.markdown(f"<span style='color: #991b1b; font-weight: bold;'>Estimated Malignancy Risk (ROM): {patient['yokohama_rom']}</span>", unsafe_allow_html=True)
 
             st.markdown("---")
-            st.markdown("#### 📊 Robinson Cytological Grading System (6 Parameters)")
-            st.caption("Score each parameter (1 to 3). Total score (6–18) and grade are calculated automatically and saved independently.")
-
+            st.markdown("#### 📊 Robinson Cytological Grading (Pre-op FNAC)")
             r1_opts = [("Mostly cohesive clusters (1)", 1), ("Moderate dissociation (2)", 2), ("Mostly isolated cells (3)", 3)]
             r2_opts = [("1–2× lymphocyte (1)", 1), ("2–4× lymphocyte (2)", 2), (">4× lymphocyte (3)", 3)]
             r3_opts = [("Uniform / monomorphic (1)", 1), ("Moderate pleomorphism (2)", 2), ("Marked pleomorphism (3)", 3)]
@@ -1144,34 +1146,25 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
             r5_opts = [("Smooth (1)", 1), ("Slightly irregular (2)", 2), ("Markedly irregular (3)", 3)]
             r6_opts = [("Fine (1)", 1), ("Granular (2)", 2), ("Coarse / clumped (3)", 3)]
 
-            def get_index_for_saved(opts, saved_val):
+            def get_idx(opts, val):
                 for i, opt in enumerate(opts):
-                    if saved_val and opt[0][:5] in saved_val:
+                    if val and opt[0][:5] in val:
                         return i
                 return 0
 
             cr1, cr2 = st.columns(2)
             with cr1:
-                r1 = st.selectbox("1. Cell dissociation", r1_opts, index=get_index_for_saved(r1_opts, patient.get("robinson_dissociation")), format_func=lambda x: x[0], key="rob_diss")
-                r2 = st.selectbox("2. Cell size", r2_opts, index=get_index_for_saved(r2_opts, patient.get("robinson_size")), format_func=lambda x: x[0], key="rob_size")
-                r3 = st.selectbox("3. Cell uniformity", r3_opts, index=get_index_for_saved(r3_opts, patient.get("robinson_uniformity")), format_func=lambda x: x[0], key="rob_unif")
+                r1 = st.selectbox("1. Cell dissociation", r1_opts, index=get_idx(r1_opts, patient.get("robinson_dissociation")), format_func=lambda x: x[0], key="rob_diss")
+                r2 = st.selectbox("2. Cell size", r2_opts, index=get_idx(r2_opts, patient.get("robinson_size")), format_func=lambda x: x[0], key="rob_size")
+                r3 = st.selectbox("3. Cell uniformity", r3_opts, index=get_idx(r3_opts, patient.get("robinson_uniformity")), format_func=lambda x: x[0], key="rob_unif")
             with cr2:
-                r4 = st.selectbox("4. Nucleoli", r4_opts, index=get_index_for_saved(r4_opts, patient.get("robinson_nucleoli")), format_func=lambda x: x[0], key="rob_nucl")
-                r5 = st.selectbox("5. Nuclear margin", r5_opts, index=get_index_for_saved(r5_opts, patient.get("robinson_margin")), format_func=lambda x: x[0], key="rob_marg")
-                r6 = st.selectbox("6. Chromatin", r6_opts, index=get_index_for_saved(r6_opts, patient.get("robinson_chromatin")), format_func=lambda x: x[0], key="rob_chrom")
+                r4 = st.selectbox("4. Nucleoli", r4_opts, index=get_idx(r4_opts, patient.get("robinson_nucleoli")), format_func=lambda x: x[0], key="rob_nucl")
+                r5 = st.selectbox("5. Nuclear margin", r5_opts, index=get_idx(r5_opts, patient.get("robinson_margin")), format_func=lambda x: x[0], key="rob_marg")
+                r6 = st.selectbox("6. Chromatin", r6_opts, index=get_idx(r6_opts, patient.get("robinson_chromatin")), format_func=lambda x: x[0], key="rob_chrom")
 
             rob_total = r1[1] + r2[1] + r3[1] + r4[1] + r5[1] + r6[1]
-            if 6 <= rob_total <= 11:
-                rob_grade = "Grade I (Low Grade / Well Differentiated)"
-                badge_class = "badge-success"
-            elif 12 <= rob_total <= 14:
-                rob_grade = "Grade II (Intermediate Grade / Moderately Differentiated)"
-                badge_class = "badge-warning"
-            else:
-                rob_grade = "Grade III (High Grade / Poorly Differentiated)"
-                badge_class = "badge-danger"
-
-            st.markdown(f"**Robinson Score:** `{rob_total} / 18` &nbsp;|&nbsp; **Grade:** <span class='{badge_class}'>{rob_grade}</span>", unsafe_allow_html=True)
+            rob_grade = "Grade I (Low Grade)" if rob_total <= 11 else ("Grade II (Intermediate)" if rob_total <= 14 else "Grade III (High Grade)")
+            st.markdown(f"**Robinson Score:** `{rob_total}/18` | **Grade:** {rob_grade}")
 
             patient["robinson_dissociation"] = r1[0]
             patient["robinson_size"] = r2[0]
@@ -1183,37 +1176,52 @@ elif role == "3. Cytology Review (AI Assist & Pathologist Sign-Off)":
             patient["robinson_grade"] = rob_grade
 
             st.markdown("---")
-            patient["path_notes"] = voice_text_area(
-                "Microscopic Observations & Remarks (Dictate with Whisper):",
-                patient.get("path_notes", ""),
-                "path_obs",
-                height=160
-            )
+            st.markdown("#### 🔬 Nottingham Histological Grading (Confirmatory Biopsy)")
+            n1_opts = [("Complete tubular formation (>75%) (1)", 1), ("Moderate tubular formation (10-75%) (2)", 2), ("Little or none (<10%) (3)", 3)]
+            n2_opts = [("Small, uniform cells (1)", 1), ("Moderate nuclear size and variation (2)", 2), ("Marked pleomorphism (3)", 3)]
+            n3_opts = [("Up to 7 mitoses/10 HPF (1)", 1), ("8–12 mitoses/10 HPF (2)", 2), (">12 mitoses/10 HPF (3)", 3)]
+
+            nc1, nc2, nc3 = st.columns(3)
+            with nc1:
+                n_tub = st.selectbox("1. Tubules", n1_opts, index=get_idx(n1_opts, patient.get("nottingham_tubules")), format_func=lambda x: x[0], key="n_tub")
+            with nc2:
+                n_pleo = st.selectbox("2. Pleomorphism", n2_opts, index=get_idx(n2_opts, patient.get("nottingham_pleomorphism")), format_func=lambda x: x[0], key="n_pleo")
+            with nc3:
+                n_mit = st.selectbox("3. Mitotic Count", n3_opts, index=get_idx(n3_opts, patient.get("nottingham_mitoses")), format_func=lambda x: x[0], key="n_mit")
+
+            nott_total = n_tub[1] + n_pleo[1] + n_mit[1]
+            nott_grade = "Grade I (Well Differentiated)" if nott_total <= 5 else ("Grade II (Moderately Differentiated)" if nott_total <= 7 else "Grade III (Poorly Differentiated)")
+            st.markdown(f"**Nottingham Score:** `{nott_total}/9` | **Grade:** {nott_grade}")
+
+            patient["nottingham_tubules"] = n_tub[0]
+            patient["nottingham_pleomorphism"] = n_pleo[0]
+            patient["nottingham_mitoses"] = n_mit[0]
+            patient["nottingham_score"] = nott_total
+            patient["nottingham_grade"] = nott_grade
+
+            st.markdown("---")
+            patient["path_notes"] = voice_text_area("Pathology Remarks (Whisper):", patient.get("path_notes", ""), "path_obs", height=140)
 
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("💾 Submit & Sign Official Report", type="primary", key="btn_submit_sign_path"):
                     patient["review_mode"] = "Final Pathologist Sign-Off"
-                    patient["audit_log"].append(f"[{datetime.date.today()}] Cytology signed off by {patient['pathologist']} ({patient['yokohama'][:10]} | Robinson {rob_total}/18)")
+                    patient["audit_log"].append(f"[{datetime.date.today()}] Cytology signed off by {patient['pathologist']}")
                     save_patient_record(patient)
-                    st.success("Official report signed and committed.")
+                    st.success("Report signed and committed.")
                     st.session_state["show_mo_notify"] = True
-
             with col_btn2:
-                if st.button("⚡ Save as Provisional (AI Assist Only)", key="btn_save_provisional_ai"):
+                if st.button("⚡ Save as Provisional", key="btn_save_provisional_ai"):
                     patient["review_mode"] = "AI Provisional"
-                    patient["pathologist"] = "AI Computer-Aided Screener (Provisional)"
-                    patient["audit_log"].append(f"[{datetime.date.today()}] Provisional AI classification saved")
+                    patient["pathologist"] = "AI Screener (Provisional)"
                     save_patient_record(patient)
-                    st.warning("Saved as provisional advisory.")
+                    st.warning("Saved as provisional.")
 
             if st.session_state.get("show_mo_notify") or patient.get("review_mode") == "Final Pathologist Sign-Off":
                 st.divider()
-                st.markdown("#### 📢 Dispatch Report to Examining MO")
-                mo_phone = voice_text_input("Frontline MO / PHC Clinic WhatsApp Number:", patient.get("mo_contact", "9876543210"), "path_mo_phone")
+                mo_phone = voice_text_input("MO WhatsApp Number:", patient.get("mo_contact", "9876543210"), "path_mo_phone")
                 patient["mo_contact"] = mo_phone
-                mo_notify_url = generate_mo_signoff_alert_link(mo_phone, patient)
-                st.link_button("📲 Notify MO of Sign-Off via WhatsApp", mo_notify_url)
+                st.link_button("📲 Notify MO via WhatsApp", generate_mo_signoff_alert_link(mo_phone, patient))
                 # =========================================================================
 # MODULE 4: CDSS TRIAGE & FORMAL REPORT
 # =========================================================================
@@ -1223,7 +1231,7 @@ elif role == "4. CDSS Triage & Advisory Report":
 
         is_ai_mode = patient.get("review_mode") == "AI Provisional"
         if is_ai_mode:
-            st.warning("⚠️ **NOTICE: THIS REPORT USES PROVISIONAL AI CYTOLOGY INFERENCE. AWAITING PATHOLOGIST REVIEW.**")
+            st.warning("⚠️ **NOTICE: THIS REPORT USES PROVISIONAL AI CYTOLOGY INFERENCE.**")
 
         cbe_suspicious = "Hard, Irregular" in patient.get("cbe_mass", "") or "Present" in patient.get("cbe_nodes", "")
         usg_suspicious = False
@@ -1240,130 +1248,32 @@ elif role == "4. CDSS Triage & Advisory Report":
         if clinical_high_risk and "Category 2: Benign" in yokohama:
             status_banner = "CRITICAL DISCORDANCE (HIGH RISK FLAGS)"
             status_color = "red"
-            analysis_text = (
-                "Physical examination and/or bedside ultrasound demonstrate high-suspicion features, "
-                "yet cytology is reported as benign. FNAB has a recognized sampling miss rate in dense, "
-                "fibrous, or scirrhous tumors. Residual post-test malignancy risk remains ~20%–30%."
-            )
-            action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY. Deferring biopsy based on benign cytology alone is unsafe."
-
+            analysis_text = "High-suspicion physical/ultrasound findings paired with benign cytology. Residual malignancy risk ~20%–30%."
+            action_text = "CONFIRMATORY CORE-NEEDLE BIOPSY IS MANDATORY."
         elif clinical_high_risk and "Category 1: Insufficient" in yokohama:
-            status_banner = "HIGH-RISK INADEQUACY (SUSPECTED DESMOPLASTIC MASS)"
+            status_banner = "HIGH-RISK INADEQUACY"
             status_color = "red"
-            analysis_text = (
-                "Bedside ultrasound or clinical palpation indicates high suspicion, but needle cytology yielded inadequate cellularity. "
-                "Invasive carcinomas with dense fibrous stroma frequently produce hypocellular aspirates. "
-                "An inadequate smear in this setting must be managed with high suspicion."
-            )
-            action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY (CNB)."
-
-        elif not clinical_high_risk and "Category 1: Insufficient" in yokohama:
-            status_banner = "INSUFFICIENT SAMPLING (LOW CLINICAL SUSPICION)"
-            status_color = "orange"
-            analysis_text = "Cytology sample contains inadequate diagnostic epithelial groups (Baseline Risk: 10%–25%)."
-            action_text = "REPEAT GUIDED FNAB OR REFER FOR DIAGNOSTIC BREAST ULTRASOUND within 2–3 weeks."
-
-        elif "Category 4: Suspicious" in yokohama or "Category 5: Malignant" in yokohama:
-            status_banner = "CONCORDANT SUSPICIOUS / MALIGNANT PROFILE"
+            analysis_text = "High clinical suspicion with inadequate cytology cellularity."
+            action_text = "BYPASS REPEAT FNAB. PROCEED DIRECTLY TO CORE-NEEDLE BIOPSY."
+        elif "Category 4" in yokohama or "Category 5" in yokohama:
+            status_banner = "CONCORDANT SUSPICIOUS / MALIGNANT"
             status_color = "red"
-            analysis_text = "Cytomorphological features unequivocally identify or strongly favor neoplasia (Risk: 60% to >97%)."
-            action_text = "URGENT TERTIARY REFERRAL for Core Biopsy (for ER, PR, HER2 profiling) and definitive oncology staging."
-
-        elif "Category 3: Atypical" in yokohama:
-            status_banner = "ATYPICAL CYTOLOGY (EQUIVOCAL)"
-            status_color = "orange"
-            analysis_text = "Smear exhibits architectural or nuclear atypia (Risk of Malignancy: 15%–50%)."
-            action_text = "REFER FOR HISTOPATHOLOGIC EVALUATION (Core-Needle Biopsy or diagnostic excision)."
-
+            analysis_text = f"Features indicate high neoplasia probability. ROM: {patient.get('yokohama_rom','')}"
+            action_text = "URGENT TERTIARY REFERRAL for Core Biopsy & oncology staging."
         else:
             status_banner = "CONCORDANT BENIGN PROFILE"
             status_color = "green"
-            analysis_text = "Physical examination, bedside sonography, and cytology findings align without suspicious features."
-            action_text = "ROUTINE CLINICAL REVIEW in 3–6 months. Educate patient on self-awareness warning signs."
+            analysis_text = "Clinical, sonographic, and cytomorphological findings align benign."
+            action_text = "ROUTINE CLINICAL REVIEW in 3–6 months."
 
-        prefix = "[PROVISIONAL AI ASSIST] " if is_ai_mode else ""
         if status_color == "red":
-            st.error(f"🚨 **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
-        elif status_color == "orange":
-            st.warning(f"⚠️ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
+            st.error(f"🚨 **{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
         else:
-            st.success(f"✅ **{prefix}{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
-
-    with st.container(border=True):
-        st.markdown("### 📤 Dispatch Official Report via WhatsApp")
-        st.caption("Patients receive a private link showing ONLY their signed report slip (no app interface or tools).")
-
-        r_col1, r_col2 = st.columns([1.5, 2])
-        recipient_type = r_col1.selectbox(
-            "Send Report To:",
-            [
-                "Patient / Family",
-                "Examining Medical Officer (MO)",
-                "Consulting Pathologist",
-                "Assigned ASHA Worker",
-                "Specific / Custom Contact"
-            ],
-            key="m4_recipient_select"
-        )
-
-        if recipient_type == "Patient / Family":
-            default_phone = patient.get("patient_contact", "")
-        elif recipient_type == "Examining Medical Officer (MO)":
-            default_phone = patient.get("mo_contact", "9876543210")
-        elif recipient_type == "Consulting Pathologist":
-            default_phone = patient.get("pathologist_phone", "9876543210")
-        elif recipient_type == "Assigned ASHA Worker":
-            default_phone = patient.get("asha_contact", "")
-        else:
-            default_phone = ""
-
-        target_phone = r_col2.text_input(
-            f"Recipient WhatsApp Number ({recipient_type}):",
-            value=default_phone,
-            placeholder="Enter 10-digit mobile number",
-            key="m4_target_phone_input"
-        )
-
-        app_base_url = "https://breast-triage-cdss.streamlit.app"
-        standalone_report_link = f"{app_base_url}/?view=report&case_id={patient['case_id']}"
-
-        if target_phone:
-            custom_wa_url = generate_pdf_whatsapp_link(recipient_type, target_phone, patient, standalone_report_link)
-            c_act1, c_act2 = st.columns([2, 1])
-            c_act1.link_button(f"📲 Send Official Slip to {recipient_type} (WhatsApp)", custom_wa_url, use_container_width=True)
-            if c_act2.button("Log Dispatch Event", key="btn_m4_log_dispatch"):
-                patient["audit_log"].append(
-                    f"[{datetime.date.today()}] Report link dispatched via WhatsApp to {recipient_type} ({target_phone})"
-                )
-                save_patient_record(patient)
-                st.success("Dispatch logged in audit trail.")
-        else:
-            st.info("💡 Enter a phone number above to activate the WhatsApp dispatch link.")
+            st.success(f"✅ **{status_banner}**\n\n**Analysis:** {analysis_text}\n\n**Directive:** {action_text}")
 
     with st.container(border=True):
         st.subheader("Formal Monochromatic Clinical Advisory Slip")
-
         p = patient
-        ai_watermark = """
-        <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; text-align: center; font-weight: bold; margin-bottom: 14px; font-size: 13px; border-radius: 8px;">
-            ⚠️ PRELIMINARY AI-ASSISTED TRIAGE REPORT — FORMAL TELE-PATHOLOGY SIGN-OFF PENDING.
-        </div>
-        """ if is_ai_mode else ""
-
-        sign_off_html = f"""
-        <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
-            <span style="font-style: italic; color: #856404; font-size: 11px;">[AI Provisional]</span><br>
-            <div style="border-bottom: 1px solid #111; margin: 8px 15px 4px 15px;"></div>
-            <strong>AI Cytology Screener</strong>
-        </div>
-        """ if is_ai_mode else f"""
-        <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
-            <div style="border-bottom: 1px solid #111; margin: 18px 15px 4px 15px;"></div>
-            <strong>Pathologist Sign-off</strong><br>
-            <span style="font-size: 11px;">{p.get('pathologist','')}</span>
-        </div>
-        """
-
         report_html = f"""
         <!DOCTYPE html>
         <html>
@@ -1374,27 +1284,24 @@ elif role == "4. CDSS Triage & Advisory Report":
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 10px; background: transparent; }}
             .slip-card {{ border: 1px solid #cbd5e1; padding: 24px; background-color: #ffffff; max-width: 800px; margin: auto; line-height: 1.5; border-radius: 12px; }}
             .header {{ text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }}
-            .header h2 {{ margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px; color: #0f172a; }}
-            .header .sub {{ font-size: 12px; font-weight: 600; color: #475569; margin-top: 4px; }}
+            .header h2 {{ margin: 0; font-size: 20px; text-transform: uppercase; color: #0f172a; }}
             .demo-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 14px; font-size: 13px; margin-bottom: 16px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }}
             .section-box {{ border-top: 1px solid #cbd5e1; padding: 12px 0; font-size: 13px; color: #334155; }}
             .advisory-box {{ border: 1px solid #0f172a; padding: 14px; margin: 16px 0; background-color: #f1f5f9; border-radius: 8px; font-size: 13px; color: #0f172a; }}
-            .footer-signatures {{ display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; margin-top: 24px; font-size: 12px; }}
-            .print-btn {{ display: block; width: 100%; max-width: 220px; margin: 0 auto 20px auto; padding: 10px; background-color: #0f172a; color: #ffffff; text-align: center; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; text-decoration: none; border: none; }}
-            @media print {{ .print-btn {{ display: none; }} body {{ padding: 0; }} .slip-card {{ border: 1px solid #000; padding: 15px; width: 100%; }} }}
+            .print-btn {{ display: block; width: 100%; max-width: 220px; margin: 0 auto 20px auto; padding: 10px; background-color: #0f172a; color: #ffffff; text-align: center; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; border: none; }}
+            @media print {{ .print-btn {{ display: none; }} body {{ padding: 0; }} .slip-card {{ border: 1px solid #000; width: 100%; }} }}
         </style>
         </head>
         <body>
         <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
         <div class="slip-card">
-            {ai_watermark}
             <div class="header">
                 <h2>PERIPHERAL BREAST TRIAGE UNIT</h2>
-                <div class="sub">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
+                <div style="font-size: 12px; font-weight: 600; color: #475569;">CLINICAL DECISION SUPPORT & TRIAGE ADVISORY REPORT</div>
             </div>
             <div class="demo-grid">
                 <div><strong>Patient:</strong> {p['name']}</div>
-                <div><strong>Age/Sex:</strong> {p['age']}y / Female</div>
+                <div><strong>Age:</strong> {p['age']}y / F</div>
                 <div><strong>Case ID:</strong> {p['case_id']}</div>
                 <div><strong>UHID:</strong> {p['uhid']}</div>
                 <div><strong>Exam Date:</strong> {p['date_exam']}</div>
@@ -1402,57 +1309,28 @@ elif role == "4. CDSS Triage & Advisory Report":
                 <div style="grid-column: 1 / -1;"><strong>Examining MO:</strong> {p['referral_doc']}</div>
             </div>
             <div class="section-box">
-                <strong>1. BEDSIDE CLINICAL & ULTRASOUND ASSESSMENT</strong><br>
-                • <strong>Palpation (CBE):</strong> {p['cbe_mass']} | Size: {p['cbe_size']} | Axillary Nodes: {p['cbe_nodes']}<br>
-                • <strong>BI-RADS Score:</strong> {p.get('birads_score', 'N/A')}<br>
-                • <strong>Clinical Notes:</strong> {p.get('cbe_notes', 'N/A')}<br>
-                • <strong>POCUS:</strong> {'Orientation: ' + p['pocus_orientation'] + ' | Margins: ' + p['pocus_margins'] if p['pocus_available'] else 'Not Performed / Unavailable'}
+                <strong>1. CLINICAL & BI-RADS STAGING</strong><br>
+                • Palpation: {p['cbe_mass']} | Size: {p['cbe_size']} | Nodes: {p['cbe_nodes']}<br>
+                • BI-RADS Score: {p.get('birads_score', 'N/A')}<br>
+                • POCUS: {'Orientation: ' + p['pocus_orientation'] if p['pocus_available'] else 'Bypassed'}
             </div>
             <div class="section-box">
-                <strong>2. CYTOLOGY, ROBINSON GRADING & TELE-PATHOLOGY</strong><br>
-                • <strong>Procedure:</strong> {p['fnac_passes']}<br>
-                • <strong>Slide Stained By:</strong> {p['prep_tech']} ({p['staining']}) | Macro Adequacy: {p['macro_adequate']}<br>
-                • <strong>Visual Records:</strong> {len(p.get('images', []))} attached record(s)<br>
-                • <strong>IAC Yokohama Category:</strong> <span style="text-decoration: underline; font-weight: bold;">{p['yokohama']}</span><br>
-                • <strong>Robinson Cytological Grade:</strong> <span style="font-weight:bold;">{p.get('robinson_grade', 'N/A')} (Score: {p.get('robinson_score', 'N/A')}/18)</span><br>
-                &nbsp;&nbsp;&nbsp;&nbsp;- Dissociation: {p.get('robinson_dissociation','')}<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;- Cell Size: {p.get('robinson_size','')}<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;- Uniformity: {p.get('robinson_uniformity','')}<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;- Nucleoli: {p.get('robinson_nucleoli','')}<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;- Nuclear Margin: {p.get('robinson_margin','')}<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;- Chromatin: {p.get('robinson_chromatin','')}<br>
-                • <strong>Assessment Mode:</strong> {p.get('review_mode','Final')}<br>
-                • <strong>Observations:</strong> {p['path_notes']}<br>
-                • <strong>Reviewer:</strong> {p.get('pathologist','')}
+                <strong>2. CYTOLOGY, ROM, ROBINSON & NOTTINGHAM HISTOPATHOLOGY</strong><br>
+                • IAC Yokohama: <strong>{p['yokohama']}</strong><br>
+                • Estimated Risk of Malignancy (ROM): <span style="color:#991b1b; font-weight:bold;">{p.get('yokohama_rom', 'N/A')}</span><br>
+                • Robinson Cytological Grade: {p.get('robinson_grade', 'N/A')} (Score: {p.get('robinson_score', 'N/A')}/18)<br>
+                • Nottingham Histological Grade: {p.get('nottingham_grade', 'N/A')} (Score: {p.get('nottingham_score', 'N/A')}/9)<br>
+                • Pathologist: {p.get('pathologist','')}
             </div>
             <div class="advisory-box">
-                <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE & CONFIRMATORY ADVISORY: {prefix}{status_banner}</div>
-                <p style="margin: 6px 0 3px 0;"><strong>Analysis:</strong> {analysis_text}</p>
-                <p style="margin: 3px 0;"><strong>Directive:</strong> <strong>{action_text}</strong></p>
-            </div>
-            <div class="footer-signatures">
-                <div style="flex: 1.2; min-width: 180px;">
-                    <strong>Community Tracker:</strong><br>
-                    ASHA: {p.get('asha_worker', 'Unassigned')}<br>
-                    Contact: {p.get('asha_contact') if p.get('asha_contact') else 'Not Provided'}<br>
-                    Area: {p.get('asha_area') if p.get('asha_area') else p.get('pincode', 'N/A')}<br>
-                    Safety Window: 21 Days
-                </div>
-                <div style="flex: 1; min-width: 140px; text-align: center; margin-top: 10px;">
-                    <div style="border-bottom: 1px solid #111; margin: 18px 15px 4px 15px;"></div>
-                    <strong>MO Sign-off</strong><br>
-                    <span style="font-size: 11px;">{p['referral_doc']}</span>
-                </div>
-                {sign_off_html}
-            </div>
-            <div style="border-top: 1px solid #cbd5e1; margin-top: 20px; padding-top: 10px; text-align: center; font-size: 11px; font-weight: bold; color: #475569;">
-                **NOT DIAGNOSTIC. Triage Advisory for Clinical Decision Support. Proceed to Confirmatory Histopathology.**
+                <div style="font-weight: bold; text-transform: uppercase;">3. TRIAGE DIRECTIVE: {status_banner}</div>
+                <p><strong>Directive:</strong> {action_text}</p>
             </div>
         </div>
         </body>
         </html>
         """
-        components.html(report_html, height=820, scrolling=True)
+        components.html(report_html, height=750, scrolling=True)
 
 # =========================================================================
 # MODULE 5: ASHA CLOSED-LOOP TRACKER
@@ -1460,99 +1338,22 @@ elif role == "4. CDSS Triage & Advisory Report":
 elif role == "5. ASHA Closed-Loop Tracker":
     with st.container(border=True):
         st.header(f"5. ASHA Community Follow-Up Tracking: {patient['name']}")
-        st.caption("Monitor tertiary referral completion within the 21-day window to eliminate loss-to-follow-up.")
-
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### ASHA Worker Assignment & Contact (Voice-Enabled)")
             patient["asha_worker"] = voice_text_input("ASHA Worker Name:", patient.get("asha_worker", ""), "asha_name_trk")
             patient["asha_contact"] = voice_text_input("ASHA Contact Number:", patient.get("asha_contact", ""), "asha_cont_trk")
-            patient["asha_area"] = voice_text_input("Assigned Area / Sector / Village:", patient.get("asha_area", ""), "asha_area_trk")
-            patient["asha_notes"] = voice_text_area("Home Visit Counseling Notes (Dictate):", patient.get("asha_notes", ""), "asha_home_notes", height=90)
-            
-            if st.button("Update ASHA Worker Details", key="btn_update_asha_details"):
-                patient["audit_log"].append(f"[{datetime.date.today()}] ASHA details updated by worker ({patient['asha_worker']})")
-                save_patient_record(patient)
-                st.success("ASHA contact and notes updated.")
-
             if patient.get("asha_contact"):
-                alert_url = generate_whatsapp_link(
-                    patient["asha_contact"],
-                    patient["name"],
-                    patient["case_id"],
-                    patient.get("yokohama", "Under Evaluation"),
-                    "Complete district hospital referral visit within 21-day safety window."
-                )
+                alert_url = generate_whatsapp_link(patient["asha_contact"], patient["name"], patient["case_id"], patient.get("yokohama", ""), "Complete district hospital referral.")
                 st.link_button("📲 Send Follow-Up Reminder via WhatsApp", alert_url)
-
         with col2:
-            st.markdown("#### Referral Milestone Status")
-            patient["tracker_status"] = st.selectbox(
-                "Current Adherence Status:",
-                [
-                    "Referral Pending (Counseling completed at PHC)",
-                    "Appointment Scheduled at District Hospital",
-                    "Core-Needle Biopsy Completed (Awaiting Histopath)",
-                    "Report Received & Followed Up",
-                    "Patient Hesitant / Refused (Requires ASHA Home Visit)"
-                ],
-                index=0 if "Pending" in patient.get("tracker_status", "") else 1,
-                key="select_tracker_status"
-            )
-            st.date_input("Follow-Up Target Deadline (21 Days):", datetime.date.today() + datetime.timedelta(days=21), key="date_followup_deadline")
-            if st.button("Save Adherence Status", key="btn_save_adherence_status"):
-                save_patient_record(patient)
-                st.success("Adherence status saved.")
-
-        st.divider()
-        st.markdown("#### Vernacular Patient Counseling Slip (Hindi)")
-        st.markdown(
-            """
-            > ### स्तन स्वास्थ्य: रोगी परामर्श पर्ची
-            > * **जांच का उद्देश्य:** आपकी शारीरिक जांच और सुई की शुरुआती जांच में अंतर पाया गया है।
-            > * **बायोप्सी क्यों जरूरी है?** सुई की बारीक जांच कभी-कभी गांठ के अंदरूनी हिस्से तक नहीं पहुंच पाती। इसलिए 100% सही नतीजे के लिए बड़े अस्पताल में कोर बायोप्सी अनिवार्य है।
-            > * **घबराएं नहीं:** कोर बायोप्सी कोई बड़ा operation नहीं है। यह सुन्न करके की जाने वाली ओपीडी जांच है और इससे गांठ बिल्कुल नहीं फैलती।
-            > * **अगला कदम:** अपनी आशा दीदी की मदद से 21 दिनों के भीतर जिला अस्पताल में जाकर यह जांच पूरी करवाएं।
-            """
-            )
-        # =========================================================================
+            patient["tracker_status"] = st.selectbox("Status:", ["Referral Pending", "Appointment Scheduled", "Core Biopsy Completed"], index=0)
+            st.date_input("Deadline (21 Days):", datetime.date.today() + datetime.timedelta(days=21))
+            # =========================================================================
 # MODULE 6: PROVENANCE AUDIT TRAIL
 # =========================================================================
 elif role == "6. Audit Trail & Provenance (Who Did What)":
     with st.container(border=True):
         st.header(f"6. Clinical Audit Trail & Provenance: Case {patient['case_id']}")
-        st.caption("Verifiable log of clinical actions, slide transfers, and assessment sign-offs.")
-
-        st.markdown("#### Summary of Clinical Roles Involved")
-        summary_data = {
-            "Clinical Stage": [
-                "Clinical Palpation & BI-RADS / POCUS",
-                "Needle Sampling (FNAC)",
-                "Slide Smear & Staining",
-                "Visual Records Attached",
-                "Cytology & Robinson Grading",
-                "Community Adherence Tracking"
-            ],
-            "Cadre": [
-                "Medical Officer",
-                "Medical Officer",
-                "Lab Technician",
-                "Collaborative (MO / Tech)",
-                "AI Engine" if patient.get("review_mode") == "AI Provisional" else "Consulting Pathologist",
-                "ASHA / ANM Worker"
-            ],
-            "Entity / Name": [
-                patient["referral_doc"],
-                patient["referral_doc"],
-                patient["prep_tech"],
-                f"{len(patient.get('images', []))} records total",
-                patient.get("pathologist", ""),
-                f"{patient.get('asha_worker', '')} ({patient.get('asha_area', '')})"
-            ]
-        }
-        st.table(summary_data)
-
-        st.markdown("#### Chronological Activity Log")
         for log_item in patient.get("audit_log", []):
             st.code(log_item, language="markdown")
 
@@ -1562,29 +1363,14 @@ elif role == "6. Audit Trail & Provenance (Who Did What)":
 elif role == "7. Advanced Batch Excel Validator & Analytics":
     with st.container(border=True):
         st.header("7. Advanced Batch Research Workbench & Excel Validator")
-        st.caption("Upload your thesis Excel dataset (e.g., Final_61_Thesis_Cases.xlsx) to batch-evaluate concordance performance, sensitivity, and specificity across all cases simultaneously.")
-
-        uploaded_thesis_file = st.file_uploader(
-            "Upload Thesis Excel / CSV Dataset:",
-            type=["xlsx", "xls", "csv"],
-            key="batch_excel_uploader"
-        )
+        uploaded_thesis_file = st.file_uploader("Upload Thesis Excel / CSV Dataset:", type=["xlsx", "xls", "csv"], key="batch_excel_uploader")
 
         if uploaded_thesis_file is not None:
             try:
                 if uploaded_thesis_file.name.endswith(".csv"):
                     batch_df = pd.read_csv(uploaded_thesis_file)
                 else:
-                    xl = pd.ExcelFile(uploaded_thesis_file)
-                    sheet_to_load = xl.sheet_names[0]
-                    if len(xl.sheet_names) > 1:
-                        sheet_to_load = st.selectbox("Select Excel Sheet:", xl.sheet_names)
-                    batch_df = pd.read_excel(uploaded_thesis_file, sheet_name=sheet_to_load)
-
-                st.success(f"Successfully loaded `{uploaded_thesis_file.name}` ({len(batch_df)} rows detected).")
-                
-                with st.expander("🔍 Preview Raw Dataset Columns & Rows", expanded=False):
-                    st.dataframe(batch_df.head(10))
+                    batch_df = pd.read_excel(uploaded_thesis_file)
 
                 if st.button("🚀 Run Batch CDSS Evaluation & Compute Metrics", type="primary"):
                     def evaluate_batch_row(row):
@@ -1594,25 +1380,15 @@ elif role == "7. Advanced Batch Excel Validator & Analytics":
                         
                         high_radio = any(b in birads for b in ["IV", "V", "4", "VI"])
                         is_malignant_cyto = "carcinoma" in cyto or "malignant" in cyto or "suspicious" in cyto
-                        is_benign_cyto = "benign" in cyto or "fibroadenoma" in cyto or "cyst" in cyto or "galactocele" in cyto or "fat necrosis" in cyto
+                        is_benign_cyto = "benign" in cyto or "fibroadenoma" in cyto or "cyst" in cyto
                         
-                        if high_radio and is_benign_cyto:
-                            rec = "Mandate CNB (Critical Discordance)"
-                            mandate = True
-                        elif high_radio or is_malignant_cyto:
-                            rec = "Mandate CNB / Referral"
-                            mandate = True
-                        else:
-                            rec = "Routine Follow-up (Benign)"
-                            mandate = False
-                            
+                        mandate = True if (high_radio and is_benign_cyto) or high_radio or is_malignant_cyto else False
                         is_mal_histo = "carcinoma" in histo or "ca" in histo or "malignant" in histo
-                        return rec, mandate, is_mal_histo
+                        return mandate, is_mal_histo
 
                     eval_results = batch_df.apply(evaluate_batch_row, axis=1)
-                    batch_df["CDSS_Recommendation"] = [r[0] for r in eval_results]
-                    batch_df["CDSS_Mandated_Biopsy"] = [r[1] for r in eval_results]
-                    batch_df["Histology_Malignant"] = [r[2] for r in eval_results]
+                    batch_df["CDSS_Mandated_Biopsy"] = [r[0] for r in eval_results]
+                    batch_df["Histology_Malignant"] = [r[1] for r in eval_results]
 
                     tp = np.sum(batch_df["CDSS_Mandated_Biopsy"] & batch_df["Histology_Malignant"])
                     fn = np.sum(~batch_df["CDSS_Mandated_Biopsy"] & batch_df["Histology_Malignant"])
@@ -1622,33 +1398,16 @@ elif role == "7. Advanced Batch Excel Validator & Analytics":
                     sens = tp / (tp + fn) if (tp + fn) > 0 else 0
                     spec = tn / (tn + fp) if (tn + fp) > 0 else 0
 
-                    st.markdown("### 📊 Batch Evaluation Results Summary")
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Total Cases", len(batch_df))
-                    m2.metric("True Positives (Cancers Caught)", tp)
-                    m3.metric("False Negatives (Missed)", fn)
-                    m4.metric("Sensitivity (Recall)", f"{sens * 100:.1f}%")
+                    m2.metric("True Positives", tp)
+                    m3.metric("False Negatives", fn)
+                    m4.metric("Sensitivity", f"{sens * 100:.1f}%")
 
                     m5, m6 = st.columns(2)
                     m5.metric("Specificity", f"{spec * 100:.1f}%")
-                    m6.metric("False Positives (Over-referral)", fp)
+                    m6.metric("False Positives", fp)
 
-                    st.divider()
-                    st.markdown("#### 📋 Evaluated Case-by-Case Breakdown Table")
-                    st.dataframe(batch_df[["Case ID", "Patient Name", "Radio / BI-RADS", "Cyto / FNAC", "CDSS_Recommendation", "Histo"]], use_container_width=True)
-
-                    output_filename = "Evaluated_Batch_Research_Report.xlsx"
-                    batch_df.to_excel(output_filename, index=False)
-                    
-                    with open(output_filename, "rb") as f:
-                        st.download_button(
-                            label="📥 Download Full Evaluated Excel Report",
-                            data=f,
-                            file_name=output_filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-
+                    st.dataframe(batch_df[["Case ID", "Patient Name", "Radio / BI-RADS", "Cyto / FNAC", "Histo"]], use_container_width=True)
             except Exception as e:
                 st.error(f"Error processing uploaded file: {e}")
-        else:
-            st.info("💡 Upload your thesis Excel file above to instantly run batch statistics.")
